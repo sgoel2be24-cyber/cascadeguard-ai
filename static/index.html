@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CascadeGuard AI — Cascading Failure Prediction</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<header>
+  <div class="logo">CASCADE<span>GUARD AI</span></div>
+  <div id="statusPill" class="status-pill status-healthy">SYSTEM HEALTHY</div>
+  <div class="gauge-wrap">
+    <div class="gauge-label">System<br>Risk</div>
+    <canvas id="riskGauge" width="260" height="68"></canvas>
+  </div>
+  <button id="chaosBtn" class="danger">⚡ Inject Failure</button>
+  <button id="autoFixBtn" class="primary">🛠 Auto-Remediate</button>
+  <button id="resetBtn">↺ Reset Sim</button>
+</header>
+
+<main>
+  <div class="panel" id="graphPanel">
+    <div class="panel-title">
+      <span>Live Service Dependency Graph — Cascade Propagation</span>
+      <span id="tickLabel">tick 0</span>
+    </div>
+    <canvas id="graph"></canvas>
+    <div id="graphHint">click a node: inject failure · hover: metrics</div>
+    <div id="tooltip"></div>
+  </div>
+
+  <div id="sidePanel">
+    <div class="panel">
+      <div class="panel-title">🎯 Root Cause Analysis</div>
+      <div class="card-body" id="rcaBody"><div class="empty">No anomalies detected. System nominal.</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">⚠ Predicted Next Failures</div>
+      <div id="predBody"><div class="empty">No services at risk.</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">🧠 Recovery Strategy Optimizer</div>
+      <div id="recBody"><div class="empty">Awaiting incident…</div></div>
+    </div>
+  </div>
+
+  <div class="panel" id="logsPanel">
+    <div class="panel-title"><span>Live Log Stream</span><span id="logCount">0 lines</span></div>
+    <div id="logs"></div>
+  </div>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
