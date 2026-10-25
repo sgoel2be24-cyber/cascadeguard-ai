@@ -13,7 +13,7 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%230b1018'/%3E%3Cpath d='M20 6 33 11v10c0 7-13 14-13 14S7 28 7 21V11Z' fill='none' stroke='%235ee7bb' stroke-width='3'/%3E%3C/svg%3E"
     />
-    <link rel="stylesheet" href="/static/styles.css?v=3.0.0" />
+    <link rel="stylesheet" href="/static/styles.css?v=4.0.0" />
   </head>
   <body>
     <a class="skip" href="#workspace">Skip to incident workspace</a>
@@ -22,6 +22,7 @@
       ><a class="rail-item active" href="#workspace" title="Incident workspace"
         >⌘</a
       ><a class="rail-item" href="#recovery" title="Recovery strategies">↗</a
+      ><a class="rail-item" href="#proofLab" title="Reproducible evidence">◎</a
       ><a class="rail-item" href="#telemetry" title="Live telemetry">≋</a
       ><button
         class="rail-item"
@@ -65,6 +66,13 @@
             </p>
           </div>
           <div class="intro-actions">
+            <button
+              id="guidedDemoBtn"
+              class="button primary"
+              title="Starts a seeded shared incident and pauses at T+16s"
+            >
+              Start guided demo →
+            </button>
             <button id="focusBtn" class="button subtle" aria-pressed="false">
               ⌗ Focus view</button
             ><button id="exportBtn" class="button subtle">
@@ -144,6 +152,15 @@
             <label for="serviceSelect">TARGET SERVICE</label
             ><select id="serviceSelect" aria-label="Target service"></select>
           </div>
+          <div class="fault-field">
+            <label for="faultKindSelect">FAULT MECHANISM</label
+            ><select id="faultKindSelect">
+              <option value="replica">Replica failure</option>
+              <option value="capacity">Capacity overload</option>
+              <option value="deployment">Bad deployment</option>
+              <option value="network">Network partition</option>
+            </select>
+          </div>
           <button id="chaosBtn" class="button subtle">Inject fault</button
           ><button id="autoFixBtn" class="button primary" disabled>
             ↗ Apply best recovery
@@ -182,7 +199,7 @@
           aria-label="Incident summary"
         ></section>
         <div class="workspace-grid">
-          <section class="panel topology">
+          <section class="panel topology" id="graphPanel">
             <div class="panel-heading">
               <div>
                 <span class="section-num">01</span>
@@ -299,6 +316,38 @@
             An incident unlocks five recovery trials. Each runs the same
             simulator with a different action.
           </div>
+          <div class="policy-bar" aria-label="Recovery constraints">
+            <div>
+              <span class="overline">RECOVERY CONSTRAINTS</span>
+              <div class="policy-caption">
+                Ranking and execution use the same policy.
+              </div>
+            </div>
+            <label class="budget-field"
+              >Downtime budget
+              <span
+                ><input
+                  id="downtimeBudget"
+                  type="number"
+                  min="0"
+                  max="120"
+                  step="1"
+                  value="60"
+                  aria-label="Maximum assumed downtime in seconds"
+                />
+                s</span
+              ></label
+            ><label class="check-field"
+              ><input id="standbyAvailable" type="checkbox" checked /> Standby
+              available</label
+            ><label class="guard-field"
+              ><input id="guardEnabled" type="checkbox" /><span
+                >Arm predictive guard<small id="guardStatus"
+                  >Operator-controlled recovery</small
+                ></span
+              ></label
+            >
+          </div>
           <div class="comparison-wrap">
             <div class="comparison-top">
               <div
@@ -339,6 +388,43 @@
           </div>
           <div id="incidentStats" class="incident-stats"></div>
           <div id="leadEvidence" class="lead-evidence"></div>
+        </section>
+        <section class="panel proof-lab" id="proofLab">
+          <div class="panel-heading">
+            <div>
+              <span class="section-num">08</span>
+              <h2>Predictive vs reactive · evidence lab</h2>
+              <span class="badge neutral">PAIRED EXPERIMENTS</span>
+            </div>
+            <a class="compact-button" href="/api/evaluation/report" download
+              >↓ Full case data</a
+            >
+          </div>
+          <div class="proof-intro">
+            <div>
+              <h3>Does acting early change the outcome?</h3>
+              <p>
+                Same seeded systems. Same physical noise. Different intervention
+                policies.
+              </p>
+            </div>
+            <span id="evidenceFreshness" class="badge neutral"
+              >Loading evidence…</span
+            >
+          </div>
+          <div id="proofMetrics" class="proof-metrics"></div>
+          <div id="proofCases" class="proof-cases"></div>
+          <details class="proof-method">
+            <summary>Method, tradeoffs, and reproducibility</summary>
+            <div id="proofMethod"></div>
+            <code>python scripts/evaluate.py</code>
+            <p>
+              These are synthetic experiments, not production availability or
+              prediction-accuracy claims. Action downtime is an assumed planning
+              cost rather than an enforced outage. A healthy gateway does not
+              mean every business feature is available during isolation.
+            </p>
+          </details>
         </section>
         <section class="bottom-grid">
           <div class="panel timeline-panel">
@@ -427,7 +513,25 @@
         Explore the workspace →
       </button>
     </dialog>
-    <script src="/static/insights.js?v=3.0.0"></script>
-    <script src="/static/app.js?v=3.0.0"></script>
+    <section
+      id="guidedCoach"
+      class="guided-coach"
+      hidden
+      aria-label="Guided demo"
+    >
+      <div class="coach-top">
+        <span id="coachProgress">GUIDED DEMO · 1 / 5</span
+        ><button id="exitGuideBtn" aria-label="Exit guided demo">✕</button>
+      </div>
+      <h2 id="coachTitle"></h2>
+      <p id="coachBody"></p>
+      <div class="coach-bottom">
+        <span>Shared sandbox · exit keeps current state</span
+        ><button id="guideNextBtn" class="button primary">Continue →</button>
+      </div>
+    </section>
+    <script src="/static/rubric.js?v=4.0.0"></script>
+    <script src="/static/insights.js?v=4.0.0"></script>
+    <script src="/static/app.js?v=4.0.0"></script>
   </body>
 </html>

@@ -9,8 +9,10 @@ from typing import Literal, Optional
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict
-from runtime import Runtime
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from runtime import Runtime, PolicyViolation
+from evaluation import load_evidence
+from fastapi.middleware.gzip import GZipMiddleware
 
 ROOT = Path(__file__).resolve().parent
 runtime = Runtime()
@@ -42,7 +44,8 @@ async def lifespan(app):
         await task
 
 
-app = FastAPI(title="CascadeGuard AI", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title="CascadeGuard AI", version="4.0.0", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 class RequestModel(BaseModel):
@@ -51,6 +54,7 @@ class RequestModel(BaseModel):
 
 class ChaosRequest(RequestModel):
     service: Optional[str] = None
+    fault_kind: Literal["replica", "capacity", "deployment", "network"] = "replica"
 
 
 class FixRequest(RequestModel):
@@ -59,7 +63,7 @@ class FixRequest(RequestModel):
 
 
 class ScenarioRequest(RequestModel):
-    scenario: Literal["payment", "cache", "search"] = "payment"
+    scenario: Literal["payment", "cache", "search", "network"] = "payment"
 
 
 class ControlRequest(RequestModel):
@@ -67,9 +71,20 @@ class ControlRequest(RequestModel):
     speed: Optional[Literal[1, 2, 4]] = None
 
 
+class GuardRequest(RequestModel):
+    enabled: StrictBool
+
+
+class PolicyRequest(RequestModel):
+    max_downtime_s: Optional[int] = Field(default=None, ge=0, le=120, strict=True)
+    standby_available: Optional[StrictBool] = None
+
+
 def execute(callback):
     try:
         return callback()
+    except PolicyViolation as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -114,7 +129,11 @@ async def report():
 
 @app.post("/api/chaos")
 async def chaos(req: ChaosRequest):
-    return {"injected": execute(lambda: runtime.inject(req.service))}
+    return {
+        "injected": execute(
+            lambda: runtime.inject(req.service, fault_kind=req.fault_kind)
+        )
+    }
 
 
 @app.post("/api/fix")
@@ -132,6 +151,41 @@ async def reset():
 @app.post("/api/scenario")
 async def scenario(req: ScenarioRequest):
     return {"ok": True, "target": execute(lambda: runtime.scenario(req.scenario))}
+
+
+@app.post("/api/guard")
+async def guard(req: GuardRequest):
+    runtime.set_guard(req.enabled)
+    return {"ok": True, "enabled": runtime.guard_enabled}
+
+
+@app.post("/api/demo")
+async def demo():
+    runtime.prepare_demo()
+    return {"ok": True, "target": "payment-db"}
+
+
+@app.get("/api/evaluation")
+async def evaluation_summary():
+    report = load_evidence()
+    report.pop("cases", None)
+    return JSONResponse(report)
+
+
+@app.get("/api/evaluation/report")
+async def evaluation_report():
+    return JSONResponse(
+        load_evidence(),
+        headers={
+            "Content-Disposition": 'attachment; filename="cascadeguard-evaluation.json"'
+        },
+    )
+
+
+@app.post("/api/policy")
+async def policy(req: PolicyRequest):
+    execute(lambda: runtime.set_policy(req.max_downtime_s, req.standby_available))
+    return {"ok": True, "policy": dict(runtime.policy)}
 
 
 @app.post("/api/control")

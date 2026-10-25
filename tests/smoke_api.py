@@ -101,6 +101,50 @@ async def websocket_check():
 
 asyncio.run(websocket_check())
 request("/api/reset", {})
+request("/api/policy", {"max_downtime_s": -1}, 422)
+request("/api/policy", {"max_downtime_s": True}, 422)
+request("/api/guard", {"enabled": "yes"}, 422)
+request("/api/chaos", {"service": "payment-db", "fault_kind": "invalid"}, 422)
+request("/api/demo", {})
+s = request("/api/state")
+assert s["tick"] == 8 and s["playback"]["paused"] and not s["guard"]["enabled"]
+request("/api/policy", {"standby_available": False, "max_downtime_s": 0})
+before = request("/api/state")
+request("/api/fix", {"service": "payment-db", "strategy": "failover"}, 409)
+request("/api/fix", {"service": "payment-db", "strategy": "restart"}, 409)
+after = request("/api/state")
+assert before["tick"] == after["tick"] and before["services"] == after["services"]
+assert all(
+    r["strategy"] in ("scale_out", "circuit_breaker")
+    for r in after["analysis"]["recommendations"]
+    if r["eligible"]
+)
+request("/api/policy", {"standby_available": True, "max_downtime_s": 60})
+for scenario, winner in (
+    ("payment", "failover"),
+    ("cache", "scale_out"),
+    ("search", "rollback"),
+    ("network", "circuit_breaker"),
+):
+    request("/api/scenario", {"scenario": scenario})
+    for _ in range(8):
+        request("/api/step", {})
+    assert request("/api/state")["analysis"]["recommendations"][0]["strategy"] == winner
+request("/api/guard", {"enabled": True})
+request("/api/scenario", {"scenario": "payment"})
+for _ in range(8):
+    request("/api/step", {})
+s = request("/api/state")
+assert s["incident"]["actions"][0]["initiated_by"] == "guard"
+assert s["services"]["api-gateway"]["state"] == "healthy"
+evidence = request("/api/evaluation")
+assert evidence["status"] == "current" and evidence["summary"]["case_count"] == 40
+full = request("/api/evaluation/report")
+assert (
+    len(full["cases"]) == 40
+    and full["implementation_sha256"] == evidence["implementation_sha256"]
+)
+request("/api/reset", {})
 print(
     json.dumps(
         {

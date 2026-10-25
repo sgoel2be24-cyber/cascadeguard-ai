@@ -3,27 +3,27 @@
 import copy
 import math
 import statistics
-from simulator import TOPOLOGY, DEPENDENTS
+from simulator import TOPOLOGY, DEPENDENTS, recovery_effect
 
 TICK_SECONDS = 2
 HORIZON = 20
 STRATEGIES = {
     "restart": {
         "downtime_s": 30,
-        "desc": "Restart instances and clear the active fault",
+        "desc": "Restart the service instances",
     },
     "failover": {
         "downtime_s": 8,
-        "desc": "Switch to a standby replica and clear the fault",
+        "desc": "Switch to a standby replica",
     },
-    "scale_out": {"downtime_s": 0, "desc": "Add capacity and halve fault pressure"},
+    "scale_out": {"downtime_s": 0, "desc": "Add horizontal processing capacity"},
     "circuit_breaker": {
         "downtime_s": 0,
         "desc": "Isolate this dependency for 40s; source stays unhealthy",
     },
     "rollback": {
         "downtime_s": 20,
-        "desc": "Revert deployment and clear the active fault",
+        "desc": "Revert the most recent deployment",
     },
 }
 
@@ -178,16 +178,29 @@ def forecast(sim, target=None, strategy=None):
     return result["mean"], result["end"]
 
 
-def recommend_strategies(sim, target, baseline=None):
+def policy_block_reason(strategy, policy=None):
+    policy = policy or {"max_downtime_s": 60, "standby_available": True}
+    if strategy == "failover" and not policy["standby_available"]:
+        return "No standby replica is available under the current policy."
+    if STRATEGIES[strategy]["downtime_s"] > policy["max_downtime_s"]:
+        return f"Assumed downtime exceeds the {policy['max_downtime_s']}s budget."
+    return None
+
+
+def recommend_strategies(sim, target, baseline=None, policy=None):
     baseline = baseline or forecast_series(sim)
     ranked = []
     for name, p in STRATEGIES.items():
         trial = forecast_series(sim, target, name)
+        blocked = policy_block_reason(name, policy)
         reduction = max(0, baseline["mean"] - trial["mean"])
         score = reduction / (1 + p["downtime_s"] / 60)
         ranked.append(
             {
                 "strategy": name,
+                "eligible": blocked is None,
+                "blocked_reason": blocked,
+                "effect_note": recovery_effect(sim.services[target], name)["note"],
                 **p,
                 "risk_reduction": round(reduction * 100, 1),
                 "projected_risk": round(trial["mean"] * 100, 1),
@@ -196,16 +209,18 @@ def recommend_strategies(sim, target, baseline=None):
                 "score": round(score * 100, 2),
             }
         )
-    ranked.sort(key=lambda r: -r["score"])
+    ranked.sort(key=lambda r: (not r["eligible"], -r["score"]))
     return ranked, round(baseline["mean"] * 100, 1)
 
 
-def analyze(sim):
+def analyze(sim, policy=None):
     risk, own = cascade_risk(sim.services, sim.tick_no)
     rc = root_cause(sim.services, own)
     baseline_trial = forecast_series(sim) if rc else None
     recs, baseline = (
-        recommend_strategies(sim, rc["service"], baseline_trial) if rc else ([], 0)
+        recommend_strategies(sim, rc["service"], baseline_trial, policy)
+        if rc
+        else ([], 0)
     )
     path = []
     if rc:

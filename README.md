@@ -14,31 +14,52 @@ An explainable incident command center for **ORCATHON 2026 · Track 01, Software
 
 A failed payment database can cascade through payment processing, orders, and the gateway. A dashboard that only shows the gateway turning red leaves an operator guessing where to act. CascadeGuard connects a leading anomaly to its dependency impact and a concrete recovery comparison in one workspace.
 
-## Try it in 90 seconds
+## Judge walkthrough
 
-1. Open the demo. Click **Focus view** for a compact presentation workspace.
-2. Keep **Payment database degradation**, then click **Run scenario**. This resets the shared sandbox to a reproducible starting state and injects a fault into `payment-db`.
-3. After approximately 6–10 seconds, inspect **Root cause**, **Failure forecast**, and **Impact chain**. Exposed callers can appear while still healthy. Forecast timing depends on the evolving metrics.
-4. Scroll to **Recovery strategy lab**. Compare the forecast mean risk, assumed downtime, and utility of all five actions. The best strategy can change with incident timing.
-5. Click **Apply best recovery**, then observe recovery over subsequent ticks. Applying a fix is not the same as instant recovery.
-6. **Export incident** downloads the current metrics, analysis, buffered logs, and action history. Try the cache and search scenarios to explore different dependency paths.
+1. Click **Start guided demo**. It prepares a seeded payment incident at T+16s, pauses it, and opens a five-step walkthrough.
+2. Inspect the topology, suspected origin, healthy callers at risk, and observed service trends.
+3. Compare the five recovery trajectories. Apply the computed best action; the guide plays at 4× and holds the completed outcome.
+4. Inspect the **Predictive vs reactive evidence lab**. Download the case-level report or reproduce it locally.
+5. Exit the guide and try another mechanism: **cache capacity exhaustion**, **search deployment regression**, or **queue network partition**. At the prepared T+16s state these favor scale-out, rollback, and temporary isolation respectively.
+6. Remove standby availability or set the assumed downtime budget to zero. Rankings and the execution API enforce the same policy. Arm the optional **predictive guard** to let the planner act and re-plan after its 40-second horizon.
 
-Graph clicks inspect service telemetry. Fault injection is an explicit action. The service selector provides keyboard access to the same metrics. Logs can be paused or filtered by severity and selected service.
+Every visitor shares the sandbox. The guided demo and scenario controls reset it. Graph clicks inspect services; fault injection remains explicit. Export the incident before resetting.
 
 ## What the engine actually does
 
-| Stage | Method | What it means |
-|---|---|---|
-| Detect | Recent four-sample latency/error means vs a rolling baseline, scaled by median absolute deviation with noise floors | Robust anomaly evidence; not a learned failure classifier |
-| Propagate | Intrinsic anomaly/health score plus attenuated risk from the weakest dependency, evaluated across the DAG | A heuristic exposure score for each caller |
-| Forecast | Health decline slope over the recent eight samples, extrapolated to the failure threshold | An approximate ETA only when a declining trend exists |
-| Explain | Prefer anomalous services without an anomalous direct dependency; rank using signal strength and affected callers | A suspected origin and visible evidence, not proven causality |
-| Compare | Clone the current simulator, apply each real action implementation, and run 20 ticks / 40 simulated seconds with identical random streams | A comparable counterfactual forecast using the same model as execution |
-| Recover | Apply the chosen action in the live synthetic sandbox; stream subsequent observed metrics | The operator sees whether the simulated chain actually recovers |
+| Stage     | Method                                                                                                                                    | What it means                                                          |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Detect    | Recent four-sample latency/error means vs a rolling baseline, scaled by median absolute deviation with noise floors                       | Robust anomaly evidence; not a learned failure classifier              |
+| Propagate | Intrinsic anomaly/health score plus attenuated risk from the weakest dependency, evaluated across the DAG                                 | A heuristic exposure score for each caller                             |
+| Forecast  | Health decline slope over the recent eight samples, extrapolated to the failure threshold                                                 | An approximate ETA only when a declining trend exists                  |
+| Explain   | Prefer anomalous services without an anomalous direct dependency; rank using signal strength and affected callers                         | A suspected origin and visible evidence, not proven causality          |
+| Compare   | Clone the current simulator, apply each real action implementation, and run 20 ticks / 40 simulated seconds with identical random streams | A comparable counterfactual forecast using the same model as execution |
+| Recover   | Apply the chosen action in the live synthetic sandbox; stream subsequent observed metrics                                                 | The operator sees whether the simulated chain actually recovers        |
 
 Utility is `mean operational-risk reduction / (1 + assumed downtime_seconds / 60)`. Reduction is displayed in **risk points**, not a percentage improvement. Counterfactual operational risk is a propagated health deficit; the overview cascade score additionally incorporates metric anomalies. The interface names these separately.
 
-A circuit breaker isolates the source from callers for 40 seconds; it does **not** heal the source and can sacrifice the dependent feature. Scale-out reduces fault pressure without clearing it. Restart, failover, and rollback clear the active simulated fault and apply different health gains. Downtime is a scoring assumption, not an enforced delay.
+Recovery effects depend on explicit synthetic fault mechanisms. Failover repairs the modeled replica failure, scale-out clears modeled capacity exhaustion, and rollback clears a modeled deployment regression. Instance actions cannot repair a network partition. A circuit breaker shields callers for 40 seconds without healing the source and may sacrifice the dependent feature. These response rules are simulator assumptions; the preferred action is computed by rolling out all five alternatives, not by looking up a recommended action. Downtime is an assumed planning cost, not an enforced outage.
+
+Policy defaults allow 60 seconds of assumed downtime and an available standby. Infeasible actions are visible but blocked in both the ranking and execution API. The opt-in predictive guard uses the same inferred origin, forecasts and feasible actions; it can re-plan after a 40-second cooldown. Reset disarms it.
+
+## Paired evidence, with inspectable controls
+
+`python scripts/evaluate.py` reproduces **40 cases: four fault mechanisms × ten seeds excluded from the demo design seed**. Four policies share the initial system and physical-noise stream: predictive intervention, reactive intervention after gateway failure, no recovery, and one early action without re-planning. Physical noise and decorative logs use separate RNGs, with a fixed draw count per physical tick.
+
+The dashboard reports gateway-failed time and service unavailability (failed **or isolated** service-seconds), so containment has a visible cost. The downloadable JSON includes every action and tick trajectory. A SHA-256 fingerprint marks reports stale after relevant implementation changes. The saved study uses default recovery constraints; changing the live policy does not rewrite it.
+
+Saved 40-case result (default policy, 160 simulated seconds per case):
+
+| Policy | Mean gateway-failed seconds | Mean unavailable service-seconds |
+|---|---:|---:|
+| Predictive guard | 0.00 | 24.25 |
+| Reactive recovery | 40.30 | 115.75 |
+| No recovery | 91.90 | 287.40 |
+| Single early action | 16.05 | 57.90 |
+
+Unavailable service-seconds count a service once per tick when failed or isolated. The predictive policy reduces that measure by 79.0% relative to the reactive baseline in this experiment.
+
+These experiments compare policies within this synthetic model. They do not validate production prediction accuracy. The modeled response rules, topology, seed selection, 160-second horizon and assumed downtime constrain the result. Forecast/observed agreement uses the same simulator and is a consistency check.
 
 The recovery evaluator has access to the simulator’s current fault state. A real digital twin would need to estimate that state from instrumentation and incident evidence. Five strategy trials are a bounded comparison, not a claim of global optimality.
 
@@ -61,6 +82,7 @@ flowchart LR
 
 - `simulator.py`: service DAG, local seeded random generator, synthetic metrics/logs, persistent timed isolation, recovery actions. Dependency health is read from the previous tick, so dictionary iteration does not create instant multi-hop propagation.
 - `engine.py`: anomaly scoring, risk propagation, evidence-based origin ranking, trend forecasts, isolated counterfactual trials.
+- `evaluation.py`: paired offline policy experiments, case-level trajectories and implementation fingerprint.
 - `runtime.py`: playback controls, tick-based incident journal, inferred initial origin retention, measured warning lead time, observed recovery outcomes and saved forecast comparisons.
 - `main.py`: validated REST endpoints, cached analysis per state revision, WebSocket stream, health endpoint, export; graceful ticker lifecycle and absolute static paths.
 - `static/`: dependency-free responsive dashboard with connection/stale-state feedback, disabled invalid actions, focus mode, keyboard controls, and reduced-motion support.
@@ -83,6 +105,7 @@ Use a **single worker**: simulation state is in memory. This prototype is delibe
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 node --check static/app.js
 node --check static/insights.js
+node --check static/rubric.js
 # Optional: run against a separate disposable preview; this resets that sandbox:
 venv/bin/python tests/smoke_api.py http://127.0.0.1:8001
 ```
@@ -93,19 +116,19 @@ The local polish pass passed **20 engine/runtime tests**, covering nominal stabi
 
 ## API
 
-| Endpoint | Purpose |
-|---|---|
-| `GET /healthz` | Liveness, mode, service count and tick |
-| `GET /api/state` | Current synthetic telemetry and analysis |
-| `WS /ws` | Changed state plus a 2-second heartbeat; supports pause and accelerated ticks |
-| `POST /api/scenario` | Reset and run `{scenario: "payment"\|"cache"\|"search"}` |
-| `POST /api/chaos` | Inject `{service?: "payment-db"}` |
-| `POST /api/fix` | Apply `{service, strategy}` |
-| `POST /api/reset` | Restore a seeded healthy reference state |
-| `GET /api/report` | Download current incident JSON, journal and forecast trajectories |
-| `POST /api/control` | Pause/resume or set wall-clock speed `{paused?: true, speed?: 1\|2\|4}` |
-| `POST /api/step` | Advance exactly one 2-second simulated tick while paused; otherwise returns 409 |
-| `GET /docs` | Interactive OpenAPI documentation |
+| Endpoint             | Purpose                                                                         |
+| -------------------- | ------------------------------------------------------------------------------- |
+| `GET /healthz`       | Liveness, mode, service count and tick                                          |
+| `GET /api/state`     | Current synthetic telemetry and analysis                                        |
+| `WS /ws`             | Changed state plus a 2-second heartbeat; supports pause and accelerated ticks   |
+| `POST /api/scenario` | Reset and run `{scenario: "payment"\|"cache"\|"search"}`                        |
+| `POST /api/chaos`    | Inject `{service?: "payment-db"}`                                               |
+| `POST /api/fix`      | Apply `{service, strategy}`                                                     |
+| `POST /api/reset`    | Restore a seeded healthy reference state                                        |
+| `GET /api/report`    | Download current incident JSON, journal and forecast trajectories               |
+| `POST /api/control`  | Pause/resume or set wall-clock speed `{paused?: true, speed?: 1\|2\|4}`         |
+| `POST /api/step`     | Advance exactly one 2-second simulated tick while paused; otherwise returns 409 |
+| `GET /docs`          | Interactive OpenAPI documentation                                               |
 
 ## Scope and next steps
 

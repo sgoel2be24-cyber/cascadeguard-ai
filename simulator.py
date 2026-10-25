@@ -113,9 +113,86 @@ ERRORS = [
 ]
 
 
+# Explicit digital-twin assumptions, not a table of recommended actions.
+# The planner still scores complete rollouts under these effects and policy limits.
+FAULT_PROFILES = {
+    "replica": {
+        "label": "Replica process failure",
+        "detail": "A failed process can be restarted or replaced by a standby.",
+    },
+    "capacity": {
+        "label": "Capacity exhaustion",
+        "detail": "Demand exceeds capacity; moving the same load to another replica does not remove it.",
+    },
+    "deployment": {
+        "label": "Deployment regression",
+        "detail": "All replicas run the bad release; rollback removes the regression.",
+    },
+    "network": {
+        "label": "Dependency partition",
+        "detail": "Instance actions cannot repair the network; isolate callers while the partition persists.",
+    },
+}
+RECOVERY_EFFECTS = {
+    "replica": {
+        "restart": (0.45, True),
+        "failover": (0.70, True),
+        "scale_out": (0.30, False),
+        "rollback": (0.20, False),
+    },
+    "capacity": {
+        "restart": (0.20, False),
+        "failover": (0.25, False),
+        "scale_out": (0.45, True),
+        "rollback": (0.10, False),
+    },
+    "deployment": {
+        "restart": (0.15, False),
+        "failover": (0.20, False),
+        "scale_out": (0.15, False),
+        "rollback": (0.70, True),
+    },
+    "network": {
+        "restart": (0, False),
+        "failover": (0, False),
+        "scale_out": (0, False),
+        "rollback": (0, False),
+    },
+}
+
+
+def recovery_effect(service, strategy):
+    if strategy == "circuit_breaker":
+        return {
+            "heal": 0,
+            "clears_fault": False,
+            "note": "Temporarily shields callers; the source remains impaired.",
+        }
+    if service.fault is None:
+        heal = {"restart": 0.45, "failover": 0.70, "scale_out": 0.30, "rollback": 0.55}[
+            strategy
+        ]
+        return {
+            "heal": heal,
+            "clears_fault": False,
+            "note": "No active fault remains; this trial models a health boost only.",
+        }
+    heal, clears = RECOVERY_EFFECTS[service.fault_kind][strategy]
+    label = FAULT_PROFILES[service.fault_kind]["label"].lower()
+    return {
+        "heal": heal,
+        "clears_fault": clears,
+        "note": ("Removes the modeled " if clears else "Does not remove the modeled ")
+        + label
+        + ".",
+    }
+
+
 class Service:
-    def __init__(self, name, rng=None):
+    def __init__(self, name, rng=None, log_rng=None):
         self.rng = rng or random.Random()
+        self.log_rng = log_rng or random.Random()
+        self.fault_kind = "replica"
         self.fault = None
         self.isolated_until = 0
         self.name = name
@@ -131,12 +208,16 @@ class Service:
     def tick(self, tick_no, dep_health):
         """Advance one tick. dep_health = min health of direct dependencies."""
         base = _base_latency(self.name)
+        # Fixed physical draws per tick; action branches do not shift future noise.
+        drag_noise = self.rng.uniform(0.4, 1.0)
+        fault_noise = self.rng.uniform(0.6, 1.0)
+        metric_noise = self.rng.uniform(0.9, 1.1)
 
         # dependency-driven degradation: bad deps drag us down, but only
         # once they are genuinely unhealthy (gradual, observable cascade)
         if dep_health < 0.70:
             drag = ((0.70 - dep_health) / 0.70) * 0.30
-            self.health = max(0.0, self.health - drag * self.rng.uniform(0.4, 1.0))
+            self.health = max(0.0, self.health - drag * drag_noise)
 
         # natural recovery toward healthy if deps fine and no injected fault
         if dep_health >= 0.70 and self.fault is None:
@@ -145,7 +226,7 @@ class Service:
         # injected fault decay
         if self.fault is not None:
             severity, ticks_left = self.fault
-            self.health = max(0.0, self.health - severity * self.rng.uniform(0.6, 1.0))
+            self.health = max(0.0, self.health - severity * fault_noise)
             self.fault = (severity, ticks_left - 1)
             if ticks_left <= 0:
                 self.fault = None
@@ -154,7 +235,7 @@ class Service:
         self.refresh_state()
 
         # metrics derive from health
-        noise = self.rng.uniform(0.9, 1.1)
+        noise = metric_noise
         self.latency = base * (1 + (1 - h) ** 2 * 25) * noise
         self.error_rate = min(1.0, 0.005 + (1 - h) ** 2 * 0.9 * noise)
         self.cpu = min(100, 25 + (1 - h) * 70 * noise)
@@ -184,26 +265,26 @@ class Service:
 
     def log_line(self, tick_no):
         deps = TOPOLOGY[self.name]
-        dep = self.rng.choice(deps) if deps else "internal"
+        dep = self.log_rng.choice(deps) if deps else "internal"
         lat = int(self.latency)
         ctx = {
             "lat": lat,
             "dep": dep,
-            "n": self.rng.randint(1, 3),
-            "pool": self.rng.randint(5, 50),
-            "hit": self.rng.randint(70, 99),
+            "n": self.log_rng.randint(1, 3),
+            "pool": self.log_rng.randint(5, 50),
+            "hit": self.log_rng.randint(70, 99),
             "mem": int(self.mem),
-            "err": self.rng.choice(ERRORS),
+            "err": self.log_rng.choice(ERRORS),
         }
         if self.state == "healthy":
-            level = "INFO" if self.rng.random() < 0.95 else "WARN"
+            level = "INFO" if self.log_rng.random() < 0.95 else "WARN"
         elif self.state == "degraded":
-            level = self.rng.choice(["WARN", "WARN", "INFO", "ERROR"])
+            level = self.log_rng.choice(["WARN", "WARN", "INFO", "ERROR"])
         elif self.state == "critical":
-            level = self.rng.choice(["ERROR", "ERROR", "WARN", "CRITICAL"])
+            level = self.log_rng.choice(["ERROR", "ERROR", "WARN", "CRITICAL"])
         else:
             level = "CRITICAL"
-        msg = self.rng.choice(LOG_TEMPLATES[level]).format(**ctx)
+        msg = self.log_rng.choice(LOG_TEMPLATES[level]).format(**ctx)
         ts = time.strftime("%H:%M:%S")
         return {
             "tick": tick_no,
@@ -217,7 +298,10 @@ class Service:
 class Simulator:
     def __init__(self, seed=None):
         self.rng = random.Random(seed)
-        self.services = {name: Service(name, self.rng) for name in TOPOLOGY}
+        self.log_rng = random.Random(self.rng.getrandbits(128))
+        self.services = {
+            name: Service(name, self.rng, self.log_rng) for name in TOPOLOGY
+        }
         self.tick_no = 0
         self.logs = deque(maxlen=400)
         self.events = deque(maxlen=60)
@@ -232,12 +316,15 @@ class Simulator:
             for svc in self.services.values():
                 svc.tick(tick, 1.0)
 
-    def inject_chaos(self, service=None, severity=None):
+    def inject_chaos(self, service=None, severity=None, fault_kind="replica"):
+        if fault_kind not in FAULT_PROFILES:
+            raise ValueError("Unknown fault type")
         service = service or self.rng.choice(
             [s for s in TOPOLOGY if DEPENDENTS[s]]
         )  # pick something with dependents
         severity = severity or self.rng.uniform(0.10, 0.18)
         svc = self.services[service]
+        svc.fault_kind = fault_kind
         svc.fault = (severity, self.rng.randint(25, 40))
         self.events.append(
             {
@@ -245,6 +332,7 @@ class Simulator:
                 "type": "chaos",
                 "service": service,
                 "severity": round(severity, 2),
+                "fault_kind": fault_kind,
             }
         )
         return service
@@ -261,21 +349,14 @@ class Simulator:
         }:
             raise ValueError("Unknown recovery strategy")
         svc = self.services[service]
-        if strategy == "restart":
-            svc.health = min(1.0, svc.health + 0.45)
+        effect = recovery_effect(svc, strategy)
+        svc.health = min(1.0, svc.health + effect["heal"])
+        if effect["clears_fault"]:
             svc.fault = None
-        elif strategy == "failover":
-            svc.health = min(1.0, svc.health + 0.70)
-            svc.fault = None
-        elif strategy == "scale_out":
-            svc.health = min(1.0, svc.health + 0.30)
-            if svc.fault:
-                svc.fault = (svc.fault[0] * 0.5, svc.fault[1])
-        elif strategy == "circuit_breaker":
+        elif strategy == "scale_out" and svc.fault and svc.fault_kind == "replica":
+            svc.fault = (svc.fault[0] * 0.5, svc.fault[1])
+        if strategy == "circuit_breaker":
             svc.isolated_until = self.tick_no + 20
-        elif strategy == "rollback":
-            svc.health = min(1.0, svc.health + 0.55)
-            svc.fault = None
         svc.refresh_state()
         self.events.append(
             {
@@ -301,7 +382,7 @@ class Simulator:
             )
             svc.tick(self.tick_no, dep_health)
             # emit 1-3 log lines per service per tick
-            for _ in range(self.rng.randint(1, 2) if svc.state == "healthy" else 3):
+            for _ in range(self.log_rng.randint(1, 2) if svc.state == "healthy" else 3):
                 self.logs.append(svc.log_line(self.tick_no))
 
     def snapshot(self):
@@ -310,6 +391,7 @@ class Simulator:
             "services": {
                 name: {
                     "state": s.state,
+                    "fault_profile": s.fault_kind if s.fault else None,
                     "isolated": s.isolated_until > self.tick_no,
                     "health": round(s.health, 3),
                     "latency": round(s.latency, 1),

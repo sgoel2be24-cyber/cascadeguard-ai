@@ -10,7 +10,7 @@ Updated 25 October 2026 during the professional polish pass.
 
 ## Demo
 
-Healthy dashboard → Focus view → Run scenario → narrate early forecast and suspected origin after about 6–10s → show impact chain and five strategy trials → Apply best recovery → observe gradual recovery → export incident. A scenario resets the shared sandbox. Graph clicks inspect. Scenarios: payment, cache and search.
+Healthy dashboard → Focus view → Run scenario → narrate early forecast and suspected origin after about 6–10s → show impact chain and five strategy trials → Apply best recovery → observe gradual recovery → export incident. A scenario resets the shared sandbox. Graph clicks inspect. Scenarios: payment replica, cache capacity, search deployment, and queue network partition. Start guided demo for a paused T+16s diagnosis and five-step tour.
 
 Telemetry is synthetic. Risk, ETA and evidence strength are heuristic estimates. Do not call the model a trained classifier or claim real-world accuracy. Recovery forecasts use simulated fault state and assumed downtime costs.
 
@@ -32,7 +32,7 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v
 node --check static/app.js
 ```
 
-Twenty engine/runtime tests passed locally, including 51 seeded origin cases. The expanded 81-check API/WebSocket run passed on the isolated preview. GitHub Actions runs engine and JS checks. Optional `venv/bin/python tests/smoke_api.py http://127.0.0.1:8001` mutates/resets the target sandbox; use a disposable preview.
+Thirty-two engine/runtime/planner tests passed locally, including 51 seeded origin cases. The expanded 81-check API/WebSocket run passed on the isolated preview. GitHub Actions runs engine and JS checks. Optional `venv/bin/python tests/smoke_api.py http://127.0.0.1:8001` mutates/resets the target sandbox; use a disposable preview.
 
 ## Remaining
 
@@ -43,3 +43,7 @@ Deadline conflict: Unstop submission stage says 4:30 PM IST; description/process
 ## Second-pass operator workflow
 
 Pause to hold a diagnosis frame, use Step +2s to explain causal propagation, and resume at 4× to show recovery quickly. Scenarios preserve pause/speed; Reset returns to live 1× and clears the incident journal. Telemetry trends exclude seeded reference samples. What if compares strategy trajectories; Applied action retains a fix forecast and overlays observed risk. The incident evidence panel records inferred origin and actual synthetic outcomes. Export before resetting. Runtime logic lives in runtime.py; the interface chart module is static/insights.js.
+
+## Rubric-focused pass
+
+Four explicit fault mechanisms, policy-constrained recovery, opt-in predictive guard with re-planning, guided walkthrough, and fingerprinted 40-case paired evidence are included. Reset disarms the guard and restores default constraints. Scenarios preserve the operator's policy and guard state. `python scripts/evaluate.py` regenerates `data/evaluation.json`; relevant code edits make its fingerprint stale. Do not hand-edit evidence figures. Full case data is downloadable from `/api/evaluation/report`.

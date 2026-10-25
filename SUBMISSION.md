@@ -23,7 +23,7 @@ CascadeGuard AI is an explainable reliability command center that demonstrates h
 A database outage often appears as failures in payment processing, ordering, and the gateway. CascadeGuard connects those symptoms to an actionable origin and makes recovery tradeoffs visible. It is a prototype for operator decision support, with synthetic rather than production telemetry.
 
 **What is innovative:**
-The same simulation implements fault propagation, recovery execution, and recovery comparison. Identical random streams make the five counterfactual trials comparable. Predictions, origin evidence, dependency impact, strategy costs, and observed recovery are inspectable in one workspace; the comparison is computed from current state rather than a fixed answer.
+The same simulation implements fault propagation, recovery execution, and recovery comparison. Identical physical-noise streams make the five counterfactual trials comparable, with decorative logs isolated from system noise. Four explicit fault mechanisms produce different computed recovery choices. A downtime/standby policy constrains ranking and execution, and an optional predictive guard can act and re-plan. A reproducible paired study compares early, reactive, no-action, and single-action policies across 40 synthetic cases. Predictions, origin evidence, dependency impact, strategy costs, and observed recovery are inspectable in one workspace; the comparison is computed from current state rather than a fixed answer.
 
 **Tools used:**
 Python 3.9+, FastAPI, Uvicorn, Pydantic, WebSockets, HTML5 Canvas, vanilla JavaScript, CSS, Cloudflare Tunnel, Git/GitHub. AI-assisted development: OpenCode (initial build, per handover) and OpenAI Codex (polish, validation, tests, documentation). No LLM API, paid AI service, external database, or frontend framework runs in the product.
@@ -32,37 +32,23 @@ Python 3.9+, FastAPI, Uvicorn, Pydantic, WebSockets, HTML5 Canvas, vanilla JavaS
 The project owner’s handover states that the initial simulator, prediction engine, API, and dashboard were built during the hackathon on 25 October 2026, with no project code written before the event. Those components already existed before the Codex polish pass. During the polish pass, we improved the recovery model and simulator consistency, added seeded scenarios, input validation and regression tests, redesigned the dashboard, and updated documentation. AI-assisted development and third-party libraries were used. Confirm the initial timing and prior-work statement against your own records before submitting; do not claim independently verified authorship history.
 
 **Validation:**
-Twenty engine/runtime tests passed, including identification of the injected origin across 17 services and three seeds (51 synthetic cases), prediction of a healthy caller before failure, five-strategy forecast/action parity, full-chain recovery, and timed circuit-breaker protection. The expanded local API/WebSocket run passed 81 checks, including explicit single-step requests. These validate the simulator prototype, not real-world prediction accuracy.
+32 engine/runtime/planner tests cover detection across all 17 origins and three seeds, four distinct recovery mechanisms, policy enforcement without partial mutation, independent physics/log RNGs, guard activation/re-planning, incident journal, and forecast consistency. The live API/WebSocket smoke suite also exercises strict inputs, policy conflicts, all four computed choices, evidence downloads, and paused streaming. The evidence lab is a separate 40-case synthetic policy comparison; report its figures with their scope rather than as production accuracy.
 
 ## Video script · approximately 2 minutes 40 seconds
 
-Narrate what is visible. Do not promise a fixed evidence score, ETA, or always-winning action. For a compact recording, capture the full genuine recovery first and trim waiting time in editing; keep the on-screen T+ clock visible and never imply that edited elapsed time is real time. Acting within about 24 seconds of injection lets the seeded payment demo return all services to healthy within about one simulated minute. A later intervention can take longer.
+Use the final app and keep the simulation clock visible. **Start guided demo** prepares T+16s and pauses; it is explicitly seeded synthetic telemetry. Its recovery step runs at visible 4× playback and automatically holds the result.
 
-**0:00–0:18 — problem and honest scope**
-“An unhealthy payment database can take down payments, orders, and eventually the gateway. CascadeGuard AI is an explainable incident command center that helps an operator see the cascade and compare recovery actions. This demo uses a live synthetic 17-service digital twin.”
+| Time      | Show                                                  | Say                                                                                                                                                                                                                                                                               |
+| --------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0:00–0:18 | Healthy overview, then Start guided demo              | “A failing dependency can cascade through payments, orders and the gateway. CascadeGuard predicts exposure, explains the likely origin, and compares recoveries. This is a synthetic 17-service prototype.”                                                                       |
+| 0:18–0:45 | Guide steps 1–2: topology, origin and metrics         | “At T+16s, payment-db has anomalous latency and errors. The detector uses metrics and graph relationships, not the injected-target label. Some callers are still healthy but exposed.”                                                                                            |
+| 0:45–1:15 | Step 3: recovery lab and constraints                  | “Each action runs in an isolated simulator copy with the same physical noise. The planner compares 40-second outcomes and assumed downtime. Missing standby blocks failover, including at the API. Different fault mechanisms can favor different actions.”                       |
+| 1:15–1:40 | Apply best & observe; show blue dots and held outcome | “This is visibly accelerated at four-times simulation playback. Observed points follow the saved forecast. Their agreement checks the shared model; it is not production validation.”                                                                                             |
+| 1:40–2:15 | Evidence lab, expand method                           | “We compare four intervention policies across four faults and ten seeds excluded from the demo design. Service-unavailability metrics include isolated services, because keeping the gateway healthy can still sacrifice a feature. Every case is downloadable and reproducible.” |
+| 2:15–2:35 | Finish guide; another scenario or guard               | “Capacity exhaustion, a bad deployment and a network partition have different response mechanics. The opt-in guard uses the same feasible-action planner and reconsiders after its horizon. Thirty-two tests cover the core contracts.”                                           |
+| 2:35–2:40 | Export / final workspace                              | “Predict the impact. Explain the origin. Compare recovery before acting.”                                                                                                                                                                                                         |
 
-**0:18–0:35 — orient**
-Show the normal overview and enter Focus view. “Here is the topology, with live telemetry every two seconds. Green nodes are healthy. I can inspect any service without changing the system. The payment scenario will inject a reproducible database fault.” Click Run scenario at the end of this segment.
-
-**0:35–0:55 — prediction and evidence**
-“Latency and errors rise at payment-db. The model compares recent observations with a robust baseline and propagates risk through the dependency graph. Notice exposed callers can appear in the forecast while still healthy. When a declining health trend is available, the engine adds an approximate time-to-failure.”
-
-Pause the simulation near T+16–24s before continuing the explanation. The transport remains live; only the synthetic world is paused.
-
-**0:55–1:15 — origin and impact**
-“Root cause ranking favors an anomalous service whose dependencies do not already explain its symptoms. Here is the metric evidence. The impact chain follows payment-db through payment-service and order-service to the gateway. Evidence strength and risk are heuristic scores, not calibrated probabilities.”
-
-**1:15–1:45 — recovery lab and action**
-Scroll to the recovery lab. “Each of these five actions runs through a separate copy of the same simulator for 40 simulated seconds, using the same starting state and random stream. The model compares mean operational risk against taking no action, with an explicit assumed downtime penalty. This is the current best action under those assumptions.” Apply the currently ranked best action before leaving this segment. Do not wait for every caller to fail.
-
-**1:45–2:10 — observed recovery**
-Choose **4× accelerated** and **Resume simulation**, then return to the topology. “I am showing recovery at four-times playback speed; the simulated clock remains visible. The action is logged. Now we watch the actual simulated recovery across subsequent ticks. A circuit breaker temporarily shields callers but does not heal the source; scale-out reduces fault pressure. Those distinctions are represented in both the forecast and execution.” If recovery is gradual, state that rather than claiming it has completed.
-
-**2:10–2:30 — technical credibility**
-“Recovery forecasts do not mutate the live system. Our tests cover origin detection across every service with three seeds, forecast/action parity, circuit-breaker expiry, and full-chain recovery. The app uses Python, FastAPI, WebSockets, and a dependency-free Canvas interface. AI development tools were used and disclosed.”
-
-**2:30–2:40 — close**
-Show export and the final overview. “The exported incident contains the current metrics, analysis, and action history. CascadeGuard AI: predict the dependency impact, explain the origin, and compare recovery before you act.”
+Read the actual evidence figures visible in the final app if you mention them. Do not guarantee an action, ETA or model score across different intervention times. Record the real app; do not substitute a scripted mock video.
 
 ## Judge Q&A
 
@@ -86,13 +72,3 @@ Show export and the final overview. “The exported incident contains the curren
 - [ ] Keep the machine awake, server running, and current tunnel alive until judging ends.
 
 **Deadline discrepancy:** The official Unstop submission stage says 4:30 PM IST on 25 October 2026, while its long description says 3:30 PM final submission and 3:15 PM build/deployment. Observed during the polish pass. Use the earlier 3:15 / 3:30 targets unless the organizers explicitly confirm otherwise. Source: https://unstop.com/hackathons/orca-coders-orcathon-devharbour-1768929
-
-## Improved recording flow with playback controls
-
-1. Enter Focus view. Run the payment scenario, then pause at roughly T+16–24s. The WebSocket connection stays live while the simulated world holds still.
-2. Explain current evidence and the first inferred origin. Use Step +2s to demonstrate a single propagation step. Focus impact dims unrelated services.
-3. Inspect the observed service trends. Compare two recovery trajectories using the action selector; comparison alone never executes the action.
-4. Apply the chosen recovery while paused. The Applied action chart retains its starting prediction. Choose 4× playback and resume: 40 simulated seconds now take about 10 wall-clock seconds plus computation time. The interface shows acceleration and simulated timestamps explicitly.
-5. Show the observed dots on the forecast curve and the incident evidence after recovery. Describe agreement as same-model consistency, not proof of production accuracy. Export before resetting.
-
-New capabilities to highlight: real observed lead time within the synthetic incident, initial inferred-origin retention, pause/step/accelerate controls, four telemetry trend charts, selectable strategy trajectories and forecast-versus-observed outcome replay.

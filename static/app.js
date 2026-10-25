@@ -51,6 +51,10 @@ function buttons() {
     "resetBtn",
     "pauseSimBtn",
     "speedSelect",
+    "guidedDemoBtn",
+    "downtimeBudget",
+    "standbyAvailable",
+    "guardEnabled",
   ])
     $(id).disabled = busy || !state || stale;
   $("autoFixBtn").disabled =
@@ -58,11 +62,15 @@ function buttons() {
     stale ||
     !state?.analysis.root_cause ||
     !state?.analysis.recommendations.length ||
+    state.analysis.recommendations[0]?.eligible === false ||
     state.analysis.recommendations[0]?.risk_reduction <= 0;
   $("stepBtn").disabled = busy || !state || stale || !state.playback.paused;
   document
     .querySelectorAll("[data-strategy]")
-    .forEach((b) => (b.disabled = busy || stale));
+    .forEach(
+      (b) => (b.disabled = busy || stale || b.dataset.eligible === "false"),
+    );
+  syncGuide();
 }
 async function refresh() {
   const res = await fetch("/api/state", {
@@ -89,6 +97,9 @@ async function action(path, body, message) {
     }
     const result = await res.json();
     if (result.target) {
+      if (state?.scenarios[$("scenario").value])
+        $("faultKindSelect").value =
+          state.scenarios[$("scenario").value].fault_kind;
       selected = result.target;
       $("serviceSelect").value = selected;
     }
@@ -107,6 +118,13 @@ async function action(path, body, message) {
   }
 }
 function receive(data) {
+  if (
+    tourStep >= 0 &&
+    tourWorld &&
+    tourWorld !== data.world_id &&
+    !tourStarting
+  )
+    closeGuide();
   if (state?.world_id === data.world_id && data.revision < state.revision)
     return;
   const same =
@@ -423,6 +441,17 @@ function render() {
       )
       .join(" "),
   );
+  if (
+    Object.keys(state.scenarios).length !== $("scenario").options.length ||
+    !$("scenario").dataset.loaded
+  ) {
+    const current = $("scenario").value;
+    $("scenario").innerHTML = Object.entries(state.scenarios)
+      .map(([id, v]) => `<option value="${esc(id)}">${esc(v.label)}</option>`)
+      .join("");
+    if (state.scenarios[current]) $("scenario").value = current;
+    $("scenario").dataset.loaded = "true";
+  }
   if (!$("serviceSelect").options.length) {
     $("serviceSelect").innerHTML = Object.keys(state.services)
       .sort()
@@ -472,7 +501,7 @@ function render() {
     ? a.recommendations
         .map(
           (r, i) =>
-            `<article class="strategy ${i === 0 ? "best" : ""}"><div class="strategy-top"><span>0${i + 1} / UTILITY ${r.score.toFixed(1)}</span>${i === 0 ? '<span class="badge">BEST</span>' : ""}</div><h3>${esc(pretty(r.strategy))}</h3><p>${esc(r.desc)}</p><div class="strategy-number">−${r.risk_reduction.toFixed(1)}</div><small>mean risk points vs no action</small><div class="strategy-cost">${r.downtime_s}s assumed downtime<br>Projected mean risk ${r.projected_risk.toFixed(1)} / 100</div><button class="button ${i === 0 ? "primary" : "subtle"}" data-strategy="${esc(r.strategy)}" data-target="${esc(rc.service)}">Apply ${esc(pretty(r.strategy))} ↗</button></article>`,
+            `<article class="strategy ${i === 0 && r.eligible ? "best" : ""} ${!r.eligible ? "blocked" : ""}"><div class="strategy-top"><span>0${i + 1} / UTILITY ${r.score.toFixed(1)}</span>${!r.eligible ? '<span class="badge neutral">BLOCKED</span>' : i === 0 ? '<span class="badge">BEST</span>' : ""}</div><h3>${esc(pretty(r.strategy))}</h3><p>${esc(r.desc)}</p><div class="strategy-number">−${r.risk_reduction.toFixed(1)}</div><small>mean risk points vs no action</small><div class="strategy-cost">${r.downtime_s}s assumed downtime<br>Projected mean risk ${r.projected_risk.toFixed(1)} / 100</div><button class="button ${i === 0 ? "primary" : "subtle"}" data-strategy="${esc(r.strategy)}" data-eligible="${r.eligible}" title="${esc(r.blocked_reason || r.effect_note)}" data-target="${esc(rc.service)}">${r.eligible ? "Apply " + esc(pretty(r.strategy)) + " ↗" : "Unavailable"}</button>${!r.eligible ? `<small class="blocked-reason">${esc(r.blocked_reason)}</small>` : ""}</article>`,
         )
         .join("")
     : templates
@@ -488,7 +517,7 @@ function render() {
         .reverse()
         .map(
           (e) =>
-            `<div class="tl-event ${e.type === "fix" ? "fix" : ""}"><span class="event-type">${e.type === "fix" ? "RECOVERY APPLIED" : "FAULT INJECTED"} · T+${e.tick * 2}s</span><b>${esc(e.service)}</b><br>${e.type === "fix" ? esc(pretty(e.strategy)) : "Synthetic fault · severity " + Math.round(e.severity * 100) + "%"}</div>`,
+            `<div class="tl-event ${e.type === "fix" ? "fix" : ""}"><span class="event-type">${e.type === "fix" ? (e.initiated_by === "guard" ? "GUARD APPLIED RECOVERY" : "RECOVERY APPLIED") : "FAULT INJECTED"} · T+${e.tick * 2}s</span><b>${esc(e.service)}</b><br>${e.type === "fix" ? esc(pretty(e.strategy)) : "Synthetic fault · severity " + Math.round(e.severity * 100) + "%"}</div>`,
         )
         .join("")
     : `<div class="empty"><strong>A clean slate.</strong>Injected faults and recovery actions appear here as you work through an incident.</div>`;
@@ -498,6 +527,10 @@ function render() {
   renderPlayback();
   renderIncident();
   renderComparison();
+  renderPolicy();
+  if (evidenceReport?.status === "current" && !evidenceHasLabels)
+    renderEvidenceLab();
+  syncGuide();
   buttons();
   if (activeStrategy)
     document
@@ -532,7 +565,7 @@ $("demoBtn").onclick = () =>
 $("chaosBtn").onclick = () =>
   action(
     "/api/chaos",
-    { service: selected },
+    { service: selected, fault_kind: $("faultKindSelect").value },
     `Fault injected into ${selected}.`,
   );
 $("resetBtn").onclick = () =>
@@ -634,6 +667,8 @@ $("leadEvidence").addEventListener("click", (e) => {
     });
   }
 });
+wireRubricControls();
+loadEvidence();
 buttons();
 refresh().catch(() => {
   connection("Unable to connect", "offline");

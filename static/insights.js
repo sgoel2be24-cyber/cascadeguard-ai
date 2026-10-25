@@ -223,6 +223,11 @@ function renderComparison() {
     const delta = a.baseline_forecast - chosen.projected_risk;
     $("forecastNarrative").innerHTML =
       `<div class="overline">${esc(pretty(chosen.strategy).toUpperCase())}<br>vs taking no action</div><div class="comparison-number" style="color:${delta >= 0 ? "var(--green)" : "var(--red)"}">${delta >= 0 ? "−" : "+"}${Math.abs(delta).toFixed(1)} <span>risk pts</span></div><div class="comparison-detail">Mean operational risk over 40s.<br><b>${a.baseline_forecast.toFixed(1)}</b> without action → <b>${chosen.projected_risk.toFixed(1)}</b> with action.</div><div class="comparison-detail"><b>${chosen.downtime_s}s</b> assumed downtime · utility <b>${chosen.score.toFixed(1)}</b>.<br>Select another action to compare its path.</div>`;
+    const profile = state.services[a.root_cause.service].fault_profile;
+    $("forecastNarrative").insertAdjacentHTML(
+      "beforeend",
+      `<div class="effect-note"><b>${profile ? esc(state.fault_profiles[profile].label) : "Residual recovery"}</b><br>${esc(chosen.effect_note)}${chosen.blocked_reason ? `<div class="blocked-reason">${esc(chosen.blocked_reason)}</div>` : ""}</div>`,
+    );
     const previewButton = document.querySelector(
       `[data-strategy="${comparisonStrategy}"]`,
     );
