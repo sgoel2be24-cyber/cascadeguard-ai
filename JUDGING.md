@@ -13,7 +13,7 @@ Aligned with the event’s published 100-point rubric. This maps inspectable evi
 
 ## Local evidence recorded during polish
 
-- 9 engine tests passed. One covers all 17 origins with 3 seeds (51 cases).
+- 10 engine tests passed. One covers all 17 origins with 3 seeds (51 cases).
 - 14 HTTP/WebSocket smoke checks passed on the isolated preview and again through the public HTTPS tunnel, including secure WebSocket streaming.
 - JavaScript syntax check passed.
 - Browser verified: live stream, nominal overview, scenario injection, inferred origin, dependency forecast, strategy cards, and focus layout. A 390px iframe viewport verified responsive behavior; action wrapping and leaf-label overlap were corrected during visual review.

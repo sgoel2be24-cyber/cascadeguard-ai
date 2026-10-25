@@ -32,11 +32,11 @@ Python 3.9+, FastAPI, Uvicorn, Pydantic, WebSockets, HTML5 Canvas, vanilla JavaS
 The project owner’s handover states that the initial simulator, prediction engine, API, and dashboard were built during the hackathon on 25 October 2026, with no project code written before the event. Those components already existed before the Codex polish pass. During the polish pass, we improved the recovery model and simulator consistency, added seeded scenarios, input validation and regression tests, redesigned the dashboard, and updated documentation. AI-assisted development and third-party libraries were used. Confirm the initial timing and prior-work statement against your own records before submitting; do not claim independently verified authorship history.
 
 **Validation:**
-Nine automated engine tests passed, including identification of the injected origin across 17 services and three seeds (51 synthetic cases), prediction of a healthy caller before failure, five-strategy forecast/action parity, full-chain recovery, and timed circuit-breaker protection. Fourteen local HTTP/WebSocket smoke checks passed. These validate the simulator prototype, not real-world prediction accuracy.
+Ten automated engine tests passed, including identification of the injected origin across 17 services and three seeds (51 synthetic cases), prediction of a healthy caller before failure, five-strategy forecast/action parity, full-chain recovery, and timed circuit-breaker protection. Fourteen local HTTP/WebSocket smoke checks passed. These validate the simulator prototype, not real-world prediction accuracy.
 
 ## Video script · approximately 2 minutes 40 seconds
 
-Narrate what is visible. Do not promise a fixed evidence score, ETA, or always-winning action.
+Narrate what is visible. Do not promise a fixed evidence score, ETA, or always-winning action. For a compact recording, capture the full genuine recovery first and trim waiting time in editing; keep the on-screen T+ clock visible and never imply that edited elapsed time is real time. Acting within about 24 seconds of injection lets the seeded payment demo return all services to healthy within about one simulated minute. A later intervention can take longer.
 
 **0:00–0:18 — problem and honest scope**
 “An unhealthy payment database can take down payments, orders, and eventually the gateway. CascadeGuard AI is an explainable incident command center that helps an operator see the cascade and compare recovery actions. This demo uses a live synthetic 17-service digital twin.”

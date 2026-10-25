@@ -126,7 +126,7 @@ class Service:
 
         # natural recovery toward healthy if deps fine and no injected fault
         if dep_health >= 0.70 and self.fault is None:
-            self.health = min(1.0, self.health + 0.03)
+            self.health = min(1.0, self.health + 0.08)
 
         # injected fault decay
         if self.fault is not None:

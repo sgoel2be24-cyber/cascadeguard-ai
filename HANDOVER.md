@@ -32,7 +32,7 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v
 node --check static/app.js
 ```
 
-Nine engine tests passed locally, including 51 seeded origin cases. Fourteen HTTP/WebSocket smoke checks passed on the isolated port-8001 preview. GitHub Actions runs engine and JS checks. Optional `venv/bin/python tests/smoke_api.py http://127.0.0.1:8001` mutates/resets the target sandbox; use a disposable preview.
+Ten engine tests passed locally, including 51 seeded origin cases. Fourteen HTTP/WebSocket smoke checks passed on the isolated port-8001 preview. GitHub Actions runs engine and JS checks. Optional `venv/bin/python tests/smoke_api.py http://127.0.0.1:8001` mutates/resets the target sandbox; use a disposable preview.
 
 ## Remaining
 

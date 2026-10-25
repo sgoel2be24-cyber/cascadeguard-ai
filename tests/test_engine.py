@@ -64,6 +64,12 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(all(x.health==1 for x in s.services.values()))
         self.assertIsNone(engine.analyze(s)['root_cause'])
 
+    def test_demo_recovery_reaches_healthy_callers_within_one_minute(self):
+        s=self.incident(ticks=12)
+        s.apply_fix('payment-db','failover')
+        for _ in range(30):s.tick()
+        self.assertTrue(all(x.state=='healthy' for x in s.services.values()))
+
     def test_circuit_breaker_protects_caller_and_expires(self):
         s=self.incident(ticks=10)
         s.services['payment-service'].health=1
