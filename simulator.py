@@ -100,14 +100,17 @@ ERRORS = ["NullPointerException", "TimeoutError", "ConnectionRefused",
 
 
 class Service:
-    def __init__(self, name):
+    def __init__(self, name, rng=None):
+        self.rng = rng or random.Random()
+        self.fault = None
+        self.isolated_until = 0
         self.name = name
         self.state = "healthy"        # healthy | degraded | critical | failed
         self.health = 1.0             # 1.0 perfect -> 0.0 dead
         self.latency = _base_latency(name)
         self.error_rate = 0.005
-        self.cpu = random.uniform(15, 35)
-        self.mem = random.uniform(20, 45)
+        self.cpu = self.rng.uniform(15, 35)
+        self.mem = self.rng.uniform(20, 45)
         self.history = deque(maxlen=120)   # metric snapshots
         self.last_anomaly_tick = None
 
@@ -119,7 +122,7 @@ class Service:
         # once they are genuinely unhealthy (gradual, observable cascade)
         if dep_health < 0.70:
             drag = ((0.70 - dep_health) / 0.70) * 0.30
-            self.health = max(0.0, self.health - drag * random.uniform(0.4, 1.0))
+            self.health = max(0.0, self.health - drag * self.rng.uniform(0.4, 1.0))
 
         # natural recovery toward healthy if deps fine and no injected fault
         if dep_health >= 0.70 and self.fault is None:
@@ -128,7 +131,7 @@ class Service:
         # injected fault decay
         if self.fault is not None:
             severity, ticks_left = self.fault
-            self.health = max(0.0, self.health - severity * random.uniform(0.6, 1.0))
+            self.health = max(0.0, self.health - severity * self.rng.uniform(0.6, 1.0))
             self.fault = (severity, ticks_left - 1)
             if ticks_left <= 0:
                 self.fault = None
@@ -139,7 +142,7 @@ class Service:
                       "critical" if h > 0.15 else "failed")
 
         # metrics derive from health
-        noise = random.uniform(0.9, 1.1)
+        noise = self.rng.uniform(0.9, 1.1)
         self.latency = base * (1 + (1 - h) ** 2 * 25) * noise
         self.error_rate = min(1.0, 0.005 + (1 - h) ** 2 * 0.9 * noise)
         self.cpu = min(100, 25 + (1 - h) * 70 * noise)
@@ -156,49 +159,58 @@ class Service:
 
     def log_line(self, tick_no):
         deps = TOPOLOGY[self.name]
-        dep = random.choice(deps) if deps else "internal"
+        dep = self.rng.choice(deps) if deps else "internal"
         lat = int(self.latency)
-        ctx = {"lat": lat, "dep": dep, "n": random.randint(1, 3),
-               "pool": random.randint(5, 50), "hit": random.randint(70, 99),
-               "mem": int(self.mem), "err": random.choice(ERRORS)}
+        ctx = {"lat": lat, "dep": dep, "n": self.rng.randint(1, 3),
+               "pool": self.rng.randint(5, 50), "hit": self.rng.randint(70, 99),
+               "mem": int(self.mem), "err": self.rng.choice(ERRORS)}
         if self.state == "healthy":
-            level = "INFO" if random.random() < 0.95 else "WARN"
+            level = "INFO" if self.rng.random() < 0.95 else "WARN"
         elif self.state == "degraded":
-            level = random.choice(["WARN", "WARN", "INFO", "ERROR"])
+            level = self.rng.choice(["WARN", "WARN", "INFO", "ERROR"])
         elif self.state == "critical":
-            level = random.choice(["ERROR", "ERROR", "WARN", "CRITICAL"])
+            level = self.rng.choice(["ERROR", "ERROR", "WARN", "CRITICAL"])
         else:
             level = "CRITICAL"
-        msg = random.choice(LOG_TEMPLATES[level]).format(**ctx)
+        msg = self.rng.choice(LOG_TEMPLATES[level]).format(**ctx)
         ts = time.strftime("%H:%M:%S")
         return {"tick": tick_no, "ts": ts, "level": level,
                 "service": self.name, "msg": msg}
 
 
 class Simulator:
-    def __init__(self):
-        self.services = {name: Service(name) for name in TOPOLOGY}
-        self.tick_no = 0
-        self.logs = deque(maxlen=400)
-        self.events = deque(maxlen=60)     # applied fixes / chaos
-
-    def reset(self):
-        self.services = {name: Service(name) for name in TOPOLOGY}
+    def __init__(self, seed=None):
+        self.rng = random.Random(seed)
+        self.services = {name: Service(name, self.rng) for name in TOPOLOGY}
         self.tick_no = 0
         self.logs = deque(maxlen=400)
         self.events = deque(maxlen=60)
+        self.warmup()
+
+    def reset(self, seed=None):
+        self.__init__(seed)
+
+    def warmup(self):
+        # Synthetic healthy reference samples; never presented as observed history.
+        for tick in range(-24, 0):
+            for svc in self.services.values():
+                svc.tick(tick, 1.0)
 
     def inject_chaos(self, service=None, severity=None):
-        service = service or random.choice(
+        service = service or self.rng.choice(
             [s for s in TOPOLOGY if DEPENDENTS[s]])  # pick something with dependents
-        severity = severity or random.uniform(0.10, 0.18)
+        severity = severity or self.rng.uniform(0.10, 0.18)
         svc = self.services[service]
-        svc.fault = (severity, random.randint(25, 40))
+        svc.fault = (severity, self.rng.randint(25, 40))
         self.events.append({"tick": self.tick_no, "type": "chaos",
                             "service": service, "severity": round(severity, 2)})
         return service
 
     def apply_fix(self, service, strategy):
+        if service not in self.services:
+            raise ValueError("Unknown service")
+        if strategy not in {"restart", "failover", "scale_out", "circuit_breaker", "rollback"}:
+            raise ValueError("Unknown recovery strategy")
         svc = self.services[service]
         if strategy == "restart":
             svc.health = min(1.0, svc.health + 0.45)
@@ -208,11 +220,10 @@ class Simulator:
             svc.fault = None
         elif strategy == "scale_out":
             svc.health = min(1.0, svc.health + 0.30)
+            if svc.fault:
+                svc.fault = (svc.fault[0] * 0.5, svc.fault[1])
         elif strategy == "circuit_breaker":
-            # doesn't heal the service, but shields dependents:
-            for dep_name in DEPENDENTS[service]:
-                d = self.services[dep_name]
-                d.health = min(1.0, d.health + 0.20)
+            svc.isolated_until = self.tick_no + 20
         elif strategy == "rollback":
             svc.health = min(1.0, svc.health + 0.55)
             svc.fault = None
@@ -221,12 +232,14 @@ class Simulator:
 
     def tick(self):
         self.tick_no += 1
+        previous = {n: s.health for n, s in self.services.items()}
         for name, svc in self.services.items():
             deps = TOPOLOGY[name]
-            dep_health = min((self.services[d].health for d in deps), default=1.0)
+            dep_health = min((previous[d] for d in deps
+                              if self.services[d].isolated_until <= self.tick_no), default=1.0)
             svc.tick(self.tick_no, dep_health)
             # emit 1-3 log lines per service per tick
-            for _ in range(random.randint(1, 2) if svc.state == "healthy" else 3):
+            for _ in range(self.rng.randint(1, 2) if svc.state == "healthy" else 3):
                 self.logs.append(svc.log_line(self.tick_no))
 
     def snapshot(self):
@@ -235,6 +248,7 @@ class Simulator:
             "services": {
                 name: {
                     "state": s.state,
+                    "isolated": s.isolated_until > self.tick_no,
                     "health": round(s.health, 3),
                     "latency": round(s.latency, 1),
                     "error_rate": round(s.error_rate, 4),

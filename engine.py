@@ -1,255 +1,139 @@
-"""Prediction engine: anomaly detection, cascade forecasting,
-root-cause analysis, and recovery strategy optimization.
-
-All analysis is derived from the live metric history produced by the
-simulator — no hard-coded answers. The same code would work on real
-metrics/logs fed through the same shape of data.
-"""
-
+"""Explainable heuristics on synthetic telemetry, with simulator-backed recovery trials."""
+import copy
 import math
-from collections import deque
-
+import statistics
 from simulator import TOPOLOGY, DEPENDENTS
 
+TICK_SECONDS = 2
+HORIZON = 20
+STRATEGIES = {
+    'restart': {'downtime_s': 30, 'desc': 'Restart instances and clear the active fault'},
+    'failover': {'downtime_s': 8, 'desc': 'Switch to a standby replica and clear the fault'},
+    'scale_out': {'downtime_s': 0, 'desc': 'Add capacity and halve fault pressure'},
+    'circuit_breaker': {'downtime_s': 0, 'desc': 'Isolate this dependency for 40s; source stays unhealthy'},
+    'rollback': {'downtime_s': 20, 'desc': 'Revert deployment and clear the active fault'},
+}
 
-# ---------------------------------------------------------------- anomalies
 
 def anomaly_score(history, key):
-    """Robust z-score of the recent window vs the baseline window."""
-    vals = [h[key] for h in history]
-    if len(vals) < 15:
+    values = [h[key] for h in history]
+    if len(values) < 15:
         return 0.0
-    recent = vals[-4:]
-    baseline = vals[:-4][-40:]
-    mean = sum(baseline) / len(baseline)
-    var = sum((v - mean) ** 2 for v in baseline) / len(baseline)
-    std = math.sqrt(var) or 1e-6
-    rmean = sum(recent) / len(recent)
-    z = (rmean - mean) / std
-    # normalize to 0..1 with a soft squash; only positive deviations matter
-    return round(1 / (1 + math.exp(-(z - 3))), 3)
+    baseline = values[:-4][-40:]
+    center = statistics.median(baseline)
+    mad = statistics.median(abs(v - center) for v in baseline)
+    floor = 0.003 if key == 'error_rate' else max(1.0, center * 0.05)
+    z = (statistics.mean(values[-4:]) - center) / max(1.4826 * mad, floor)
+    return round(max(0.0, min(1.0, (z - 2) / 8)), 3)
 
 
-def trend_slope(history, key, window=10):
+def trend_slope(history, key, window=8):
     vals = [h[key] for h in history][-window:]
     n = len(vals)
     if n < 3:
         return 0.0
-    xs = list(range(n))
-    xm = sum(xs) / n
+    xm = (n - 1) / 2
     ym = sum(vals) / n
-    denom = sum((x - xm) ** 2 for x in xs) or 1e-6
-    return sum((x - xm) * (y - ym) for x, y in zip(xs, vals)) / denom
+    return sum((i - xm) * (v - ym) for i, v in enumerate(vals)) / sum((i - xm)**2 for i in range(n))
 
 
-# ---------------------------------------------------------------- cascade
-
-def cascade_risk(services):
-    """Propagate failure risk downstream through the dependency graph.
-
-    risk(svc) = own_anomaly OR contribution from failing dependencies,
-    iterated to fixpoint. Returns {service: risk 0..1}.
-    """
-    own = {}
-    for name, svc in services.items():
-        hist = list(svc.history)
-        a_err = anomaly_score(hist, "error_rate")
-        a_lat = anomaly_score(hist, "latency")
-        health_factor = 1.0 - svc.health
-        own[name] = min(1.0, 0.45 * a_err + 0.30 * a_lat + 0.55 * health_factor)
-
+def propagate(own, services=None, tick=0):
     risk = dict(own)
-    for _ in range(len(TOPOLOGY)):  # fixpoint, graph is a DAG
-        changed = False
-        for name in TOPOLOGY:
-            deps = TOPOLOGY[name]
-            if not deps:
-                continue
-            dep_risk = max(risk[d] for d in deps)          # weakest link
-            propagated = 0.75 * dep_risk
-            new = max(risk[name], own[name] + propagated * (1 - own[name]))
-            if abs(new - risk[name]) > 1e-4:
-                risk[name] = new
-                changed = True
-        if not changed:
-            break
-    return {k: round(v, 3) for k, v in risk.items()}, own
+    for _ in TOPOLOGY:
+        for name, deps in TOPOLOGY.items():
+            active = [d for d in deps if services is None or services[d].isolated_until <= tick]
+            contribution = 0.75 * max((risk[d] for d in active), default=0)
+            risk[name] = own[name] + contribution * (1 - own[name])
+    return risk
 
 
-def predict_next_failures(services, risk, top=4):
-    """Rank healthy-ish services most likely to fail next, with ETA."""
-    out = []
-    for name, svc in services.items():
-        if svc.state == "failed":
-            continue
-        r = risk[name]
-        if r < 0.15:
-            continue
-        slope = trend_slope(list(svc.history), "health")
-        slope = -slope  # health falling = positive risk slope
-        if slope > 0.005:
-            eta_ticks = max(1, int((svc.health - 0.15) / slope))
-        else:
-            eta_ticks = None
-        out.append({
-            "service": name,
-            "risk": r,
-            "eta_ticks": eta_ticks,
-            "eta_label": f"~{eta_ticks * 2}s" if eta_ticks else "stable",
-            "state": svc.state,
-        })
-    out.sort(key=lambda x: -x["risk"])
-    return out[:top]
+def cascade_risk(services, tick=0):
+    own = {n: min(1, .45 * anomaly_score(s.history, 'error_rate') + .30 * anomaly_score(s.history, 'latency') + .55 * (1-s.health)) for n, s in services.items()}
+    return {n: round(r, 3) for n, r in propagate(own, services, tick).items()}, own
 
 
 def blast_radius(service):
-    """All services reachable downstream (who depends on `service`)."""
     seen, stack = set(), [service]
     while stack:
-        cur = stack.pop()
-        for dep in DEPENDENTS[cur]:
-            if dep not in seen:
-                seen.add(dep)
-                stack.append(dep)
+        for name in DEPENDENTS[stack.pop()]:
+            if name not in seen:
+                seen.add(name)
+                stack.append(name)
     return seen
 
 
-# ---------------------------------------------------------------- root cause
+def predict_next_failures(services, risk, top=4):
+    out = []
+    for name, s in services.items():
+        if s.state == 'failed' or risk[name] < .18:
+            continue
+        falling = -trend_slope(s.history, 'health')
+        eta = max(1, math.ceil((s.health-.15)/falling)) if falling > .005 else None
+        out.append({'service': name, 'risk': risk[name], 'eta_ticks': eta,
+                    'eta_label': f'~{eta*TICK_SECONDS}s' if eta else 'Dependency exposure', 'state': s.state})
+    return sorted(out, key=lambda p: -p['risk'])[:top]
 
-def root_cause(services, own_anomaly):
-    """Root cause = anomalous service whose anomalies explain downstream
-    failures and that is not itself explained by an upstream anomaly."""
+
+def root_cause(services, own):
+    anomalous = {n for n, a in own.items() if a > .35}
     candidates = []
-    anomalous = [n for n, a in own_anomaly.items() if a > 0.35]
     for name in anomalous:
-        svc = services[name]
-        # is any direct dependency also anomalous and earlier?
-        explained = False
-        for d in TOPOLOGY[name]:
-            if d in anomalous:
-                dd, ss = services[d].history, svc.history
-                if dd and ss and len(dd) >= 5 and len(ss) >= 5:
-                    explained = True
-        downstream = blast_radius(name) & set(anomalous)
-        confidence = min(0.99, 0.45 + 0.12 * len(downstream)
-                         + 0.15 * (not explained) + 0.2 * own_anomaly[name])
-        candidates.append({
-            "service": name,
-            "confidence": round(confidence, 2),
-            "explained_by_upstream": explained,
-            "affected_downstream": sorted(downstream),
-            "evidence": _evidence(svc),
-        })
-    candidates.sort(key=lambda c: (-c["confidence"]))
+        s = services[name]
+        explained = any(d in anomalous for d in TOPOLOGY[name])
+        downstream = blast_radius(name) & anomalous
+        strength = min(.98, .55 + .25 * own[name] + .04 * len(downstream))
+        evidence = [f'Error rate {s.error_rate*100:.1f}% · latency {s.latency:.0f} ms',
+                    f'Health {s.health*100:.0f}% · CPU {s.cpu:.0f}% · memory {s.mem:.0f}%',
+                    'Anomalous dependencies also present' if explained else 'No anomalous direct dependency explains this signal']
+        candidates.append({'service':name, 'confidence':round(strength,2),
+                           'explained_by_upstream':explained,'affected_downstream':sorted(downstream),'evidence':evidence})
+    candidates.sort(key=lambda c: (c['explained_by_upstream'], -c['confidence'], c['service']))
     return candidates[0] if candidates else None
 
 
-def _evidence(svc):
-    hist = list(svc.history)
-    ev = []
-    if anomaly_score(hist, "error_rate") > 0.4:
-        ev.append(f"error rate spiked to {svc.error_rate * 100:.0f}%")
-    if anomaly_score(hist, "latency") > 0.4:
-        ev.append(f"latency {svc.latency:.0f}ms vs baseline")
-    if svc.cpu > 75:
-        ev.append(f"CPU saturated at {svc.cpu:.0f}%")
-    if svc.mem > 80:
-        ev.append(f"memory pressure {svc.mem:.0f}%")
-    return ev or ["health declining without upstream cause"]
+def operational_risk(sim):
+    return sum(propagate({n: 1-s.health for n,s in sim.services.items()}, sim.services, sim.tick_no).values()) / len(TOPOLOGY)
 
 
-# ---------------------------------------------------------------- recovery
-
-STRATEGIES = {
-    "restart":          {"heal": 0.45, "shield": 0.0,  "downtime_s": 30, "desc": "Restart the failing service instances"},
-    "failover":         {"heal": 0.70, "shield": 0.0,  "downtime_s": 8,  "desc": "Fail over to standby replica"},
-    "scale_out":        {"heal": 0.30, "shield": 0.0,  "downtime_s": 0,  "desc": "Add capacity (horizontal scale)"},
-    "circuit_breaker":  {"heal": 0.0,  "shield": 0.6,  "downtime_s": 0,  "desc": "Open circuit breaker to shield dependents"},
-    "rollback":         {"heal": 0.55, "shield": 0.0,  "downtime_s": 20, "desc": "Roll back the last deployment"},
-}
-
-
-def _projected_system_risk(services, target, strat):
-    """Cheap counterfactual: heal target, shield its dependents,
-    then re-propagate risk over the graph."""
-    heal = STRATEGIES[strat]["heal"]
-    shield = STRATEGIES[strat]["shield"]
-    eff_health = {n: s.health for n, s in services.items()}
-    eff_health[target] = min(1.0, eff_health[target] + heal)
-    if shield:
-        for d in DEPENDENTS[target]:
-            eff_health[d] = min(1.0, eff_health[d] + shield * (1 - services[target].health))
-
-    own = {n: 1.0 - h for n, h in eff_health.items()}
-    risk = dict(own)
-    for _ in range(len(TOPOLOGY)):
-        changed = False
-        for name in TOPOLOGY:
-            deps = TOPOLOGY[name]
-            if not deps:
-                continue
-            propagated = 0.75 * max(risk[d] for d in deps)
-            new = max(risk[name], own[name] + propagated * (1 - own[name]))
-            if abs(new - risk[name]) > 1e-4:
-                risk[name] = new
-                changed = True
-        if not changed:
-            break
-    return sum(risk.values())
+def forecast(sim, target=None, strategy=None):
+    trial = copy.deepcopy(sim)
+    if strategy:
+        trial.apply_fix(target, strategy)
+    risks = []
+    for _ in range(HORIZON):
+        trial.tick()
+        risks.append(operational_risk(trial))
+    return sum(risks)/len(risks), risks[-1]
 
 
-def recommend_strategies(services, target):
-    """Compare every recovery strategy for `target`; return ranked list."""
-    # baseline: projected system risk with no action taken
-    heal0 = {n: s.health for n, s in services.items()}
-    own0 = {n: 1.0 - h for n, h in heal0.items()}
-    base = dict(own0)
-    for _ in range(len(TOPOLOGY)):
-        changed = False
-        for name in TOPOLOGY:
-            deps = TOPOLOGY[name]
-            if not deps:
-                continue
-            propagated = 0.75 * max(base[d] for d in deps)
-            new = max(base[name], own0[name] + propagated * (1 - own0[name]))
-            if abs(new - base[name]) > 1e-4:
-                base[name] = new
-                changed = True
-        if not changed:
-            break
-    current = sum(base.values())
-
+def recommend_strategies(sim, target):
+    baseline, baseline_end = forecast(sim)
     ranked = []
-    for name, p in STRATEGIES.items():
-        projected = _projected_system_risk(services, target, name)
-        reduction = max(0.0, current - projected)
-        cost = p["downtime_s"] / 60.0
-        score = reduction / (1.0 + cost)
-        ranked.append({
-            "strategy": name,
-            "desc": p["desc"],
-            "risk_reduction": round(reduction, 2),
-            "downtime_s": p["downtime_s"],
-            "score": round(score, 3),
-        })
-    ranked.sort(key=lambda r: -r["score"])
-    return ranked, round(current, 2)
+    for name,p in STRATEGIES.items():
+        projected, ending = forecast(sim,target,name)
+        reduction = max(0, baseline-projected)
+        score = reduction / (1+p['downtime_s']/60)
+        ranked.append({'strategy':name, **p, 'risk_reduction':round(reduction*100,1),
+                       'projected_risk':round(projected*100,1),'end_risk':round(ending*100,1),'score':round(score*100,2)})
+    ranked.sort(key=lambda r:-r['score'])
+    return ranked, round(baseline*100,1)
 
-
-# ---------------------------------------------------------------- top-level
 
 def analyze(sim):
-    services = sim.services
-    risk, own = cascade_risk(services)
-    rc = root_cause(services, own)
-    recs, system_risk = (recommend_strategies(services, rc["service"])
-                         if rc else ([], 0.0))
-    return {
-        "risk": risk,
-        "own_anomaly": {k: round(v, 3) for k, v in own.items()},
-        "predictions": predict_next_failures(services, risk),
-        "root_cause": rc,
-        "recommendations": recs,
-        "system_risk": system_risk,
-        "cascade_path": sorted(blast_radius(rc["service"])) if rc else [],
-    }
+    risk, own = cascade_risk(sim.services,sim.tick_no)
+    rc = root_cause(sim.services,own)
+    recs, baseline = recommend_strategies(sim,rc['service']) if rc else ([],0)
+    path = []
+    if rc:
+        frontier = [rc['service']]
+        seen = set(frontier)
+        while frontier:
+            path.append(frontier)
+            frontier = sorted({d for n in frontier for d in DEPENDENTS[n]} - seen)
+            seen.update(frontier)
+    return {'risk':risk,'own_anomaly':{n:round(v,3) for n,v in own.items()},
+            'predictions':predict_next_failures(sim.services,risk),'root_cause':rc,
+            'recommendations':recs,'system_risk':round(sum(risk.values()),3),
+            'cascade_path':sorted(blast_radius(rc['service'])) if rc else [],
+            'cascade_layers':path,'baseline_forecast':baseline,'horizon_s':HORIZON*TICK_SECONDS,
+            'method':'Heuristic risk scores, not calibrated failure probabilities. ETA extrapolates recent health slope. Recovery trials use synthetic simulator state and identical random streams; estimates are not production guarantees.'}

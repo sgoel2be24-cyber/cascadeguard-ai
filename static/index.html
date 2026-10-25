@@ -1,66 +1,329 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CascadeGuard AI — Cascading Failure Prediction</title>
-<link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-
-<header>
-  <div class="logo">CASCADEGUARD<span>AI · FAILURE PREDICTION</span></div>
-  <div id="statusPill" class="status-pill status-healthy">SYSTEM HEALTHY</div>
-  <div class="gauge-wrap">
-    <div class="gauge-label">System<br>Risk</div>
-    <canvas id="riskGauge" width="150" height="40"></canvas>
-  </div>
-  <button id="chaosBtn" class="danger">⚡ Inject Failure</button>
-  <button id="autoFixBtn" class="primary">🛠 Auto-Remediate</button>
-  <button id="resetBtn">↺ Reset Sim</button>
-</header>
-
-<div id="timeline"><span class="tl-label">INCIDENT TIMELINE</span><div id="tlEvents"><span class="tl-empty">no incidents yet — inject a failure to begin</span></div></div>
-
-<main>
-  <div class="panel" id="graphPanel">
-    <div class="panel-title">
-      <span>Live Service Dependency Graph — Cascade Propagation</span>
-      <span id="tickLabel">tick 0</span>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0b1018" />
+    <meta
+      name="description"
+      content="An explainable incident command center: forecast cascading failures, trace their origin, and compare recovery strategies in a live microservice simulation."
+    />
+    <title>CascadeGuard AI · Incident Command</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%230b1018'/%3E%3Cpath d='M20 6 33 11v10c0 7-13 14-13 14S7 28 7 21V11Z' fill='none' stroke='%235ee7bb' stroke-width='3'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <a class="skip" href="#workspace">Skip to incident workspace</a>
+    <aside class="rail" aria-label="Navigation">
+      <a class="brand-mark" href="/" aria-label="CascadeGuard home">◈</a
+      ><a class="rail-item active" href="#workspace" title="Incident workspace"
+        >⌘</a
+      ><a class="rail-item" href="#recovery" title="Recovery strategies">↗</a
+      ><a class="rail-item" href="#telemetry" title="Live telemetry">≋</a
+      ><button
+        class="rail-item"
+        id="helpBtn"
+        title="How it works"
+        aria-label="How it works"
+      >
+        ?</button
+      ><span class="rail-bottom">CG<br />01</span>
+    </aside>
+    <div class="app-shell">
+      <header>
+        <a class="wordmark" href="/">CascadeGuard<span>AI</span></a>
+        <div class="breadcrumb">Workspace <span>/</span> Incident command</div>
+        <div class="header-right">
+          <button id="focusExit">Exit focus</button
+          ><span class="env-label">SANDBOX</span
+          ><span id="connection" class="connection">Connecting…</span
+          ><a
+            class="repo-link"
+            href="https://github.com/sgoel2be24-cyber/cascadeguard-ai"
+            target="_blank"
+            rel="noopener"
+            >GitHub ↗</a
+          >
+        </div>
+      </header>
+      <main id="workspace">
+        <section class="intro">
+          <div>
+            <div class="eyebrow">
+              <span class="live-dot"></span> PREDICTIVE RELIABILITY OPERATIONS
+            </div>
+            <h1>
+              See the cascade.<br class="mobile-break" />
+              Stop the outage.
+            </h1>
+            <p>
+              Trace a failing dependency. Anticipate its impact. Choose a
+              recovery backed by simulation.
+            </p>
+          </div>
+          <div class="intro-actions">
+            <button id="focusBtn" class="button subtle" aria-pressed="false">
+              ⌗ Focus view</button
+            ><button id="exportBtn" class="button subtle">
+              ↓ Export incident</button
+            ><button id="resetBtn" class="button subtle">
+              ↺ Reset sandbox
+            </button>
+          </div>
+        </section>
+        <div class="sandbox-note">
+          <span class="small-tag">SIMULATED TELEMETRY</span
+          ><span
+            >17 services · shared live sandbox · 2s refresh · explainable
+            statistical & graph models</span
+          ><button id="methodBtn">How it works ↗</button>
+        </div>
+        <section class="metrics" aria-label="System overview">
+          <div class="metric">
+            <span class="metric-label">SERVICE HEALTH <span>01</span></span>
+            <div class="metric-value">
+              <b id="healthyCount">—</b><span>/ 17</span
+              ><em id="statusPill">Awaiting telemetry</em>
+            </div>
+            <div class="metric-foot" id="healthDetail">
+              Monitoring service dependencies
+            </div>
+          </div>
+          <div class="metric">
+            <span class="metric-label">CASCADE RISK <span>02</span></span>
+            <div class="metric-value">
+              <b id="riskValue">—</b><span>%</span
+              ><svg class="spark" viewBox="0 0 120 35" aria-hidden="true">
+                <polyline
+                  id="riskSpark"
+                  points=""
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
+              </svg>
+            </div>
+            <div class="metric-foot">
+              Mean graph risk score · heuristic estimate
+            </div>
+          </div>
+          <div class="metric">
+            <span class="metric-label">PREDICTED EXPOSURE <span>03</span></span>
+            <div class="metric-value">
+              <b id="exposureCount">—</b><span>services</span>
+            </div>
+            <div class="metric-foot" id="exposureDetail">
+              Downstream reach from the suspected origin
+            </div>
+          </div>
+          <div class="metric">
+            <span class="metric-label">RECOVERY OUTLOOK <span>04</span></span>
+            <div class="metric-value">
+              <b id="recoveryValue">—</b><span id="recoveryUnit">risk pts</span>
+            </div>
+            <div class="metric-foot" id="recoveryDetail">
+              Compare actions when an incident is detected
+            </div>
+          </div>
+        </section>
+        <section class="command-bar" aria-label="Demo controls">
+          <div class="scenario-field">
+            <label for="scenario">FAILURE SCENARIO</label
+            ><select id="scenario">
+              <option value="payment">Payment database degradation</option>
+              <option value="cache">Shared cache saturation</option>
+              <option value="search">Search cluster outage</option>
+            </select>
+          </div>
+          <button id="demoBtn" class="button danger">＋ Run scenario</button>
+          <div class="command-divider"></div>
+          <div class="selected-field">
+            <label for="serviceSelect">TARGET SERVICE</label
+            ><select id="serviceSelect" aria-label="Target service"></select>
+          </div>
+          <button id="chaosBtn" class="button subtle">Inject fault</button
+          ><button id="autoFixBtn" class="button primary" disabled>
+            ↗ Apply best recovery
+          </button>
+        </section>
+        <div class="workspace-grid">
+          <section class="panel topology">
+            <div class="panel-heading">
+              <div>
+                <span class="section-num">01</span>
+                <h2>Service topology</h2>
+                <span class="badge">LIVE</span>
+              </div>
+              <span id="tickLabel">Waiting for stream</span>
+            </div>
+            <div class="graph-toolbar">
+              <span><i class="dot healthy"></i> Healthy</span
+              ><span><i class="dot degraded"></i> Degraded</span
+              ><span><i class="dot critical"></i> Critical / failed</span
+              ><span><i class="dot predicted"></i> Predicted risk</span>
+            </div>
+            <div class="graph-scroll">
+              <div class="graph-frame">
+                <div class="graph-columns">
+                  <span>ENTRYPOINT</span><span>APPLICATION</span
+                  ><span>PROCESSING</span><span>DEPENDENCIES</span
+                  ><span>DATA & INFRA</span>
+                </div>
+                <canvas
+                  id="graph"
+                  aria-label="Live dependency topology. Use the target service selector to inspect individual service metrics."
+                  role="img"
+                ></canvas>
+                <div id="tooltip"></div>
+              </div>
+            </div>
+            <div class="graph-footer">
+              <span>← Failure impact flows toward callers</span
+              ><span>Click a service to inspect</span>
+            </div>
+            <div class="inspection" id="inspection">
+              Select a service to inspect its telemetry.
+            </div>
+          </section>
+          <aside class="intelligence">
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="section-num">02</span>
+                  <h2>Root cause</h2>
+                </div>
+                <span class="badge neutral">EXPLAINABLE</span>
+              </div>
+              <div id="rcaBody" class="card-body"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="section-num">03</span>
+                  <h2>Failure forecast</h2>
+                </div>
+                <span class="badge neutral">NEXT</span>
+              </div>
+              <div id="predBody"></div>
+              <div class="panel-note">
+                Risk is a heuristic score. Time estimates extrapolate recent
+                health decline.
+              </div>
+            </section>
+            <section class="panel route-panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="section-num">04</span>
+                  <h2>Impact chain</h2>
+                </div>
+              </div>
+              <div id="chainBody" class="card-body"></div>
+            </section>
+          </aside>
+        </div>
+        <section class="panel recovery" id="recovery">
+          <div class="panel-heading">
+            <div>
+              <span class="section-num">05</span>
+              <h2>Recovery strategy lab</h2>
+              <span class="badge neutral">COUNTERFACTUAL</span>
+            </div>
+            <span>40s simulated horizon · same starting state</span>
+          </div>
+          <div class="recovery-context" id="recoveryContext">
+            An incident unlocks five recovery trials. Each runs the same
+            simulator with a different action.
+          </div>
+          <div id="recBody" class="strategy-grid"></div>
+          <div class="panel-note">
+            Utility = mean risk reduction ÷ (1 + estimated downtime / 60).
+            Downtime is an assumed strategy cost; execution is simulated.
+          </div>
+        </section>
+        <section class="bottom-grid">
+          <div class="panel timeline-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="section-num">06</span>
+                <h2>Incident activity</h2>
+              </div>
+              <span id="eventCount">0 events</span>
+            </div>
+            <div id="tlEvents"></div>
+          </div>
+          <div class="panel" id="telemetry">
+            <div class="panel-heading">
+              <div>
+                <span class="section-num">07</span>
+                <h2>Telemetry stream</h2>
+              </div>
+              <div class="log-controls">
+                <label class="sr-only" for="logFilter">Filter logs</label
+                ><select id="logFilter">
+                  <option value="all">All levels</option>
+                  <option value="errors">Errors & critical</option>
+                  <option value="selected">Selected service</option></select
+                ><button id="pauseLogs" aria-pressed="false">Pause</button
+                ><span id="logCount"></span>
+              </div>
+            </div>
+            <div id="logs" role="log" aria-label="Synthetic service logs"></div>
+          </div>
+        </section>
+        <footer>
+          <span
+            >CASCADEGUARD AI
+            <span class="muted">/ Predict. Explain. Recover.</span></span
+          ><span>ORCATHON 2026 · Software & AI · Built by Shikhar</span>
+        </footer>
+      </main>
     </div>
-    <canvas id="graph"></canvas>
-    <div id="legend">
-      <span><i class="dot" style="background:#2ecc71"></i>healthy</span>
-      <span><i class="dot" style="background:#f5a623"></i>degraded</span>
-      <span><i class="dot" style="background:#ff4d5e"></i>critical</span>
-      <span><i class="dot" style="background:#b8002e"></i>failed</span>
-      <span><i class="ring"></i>predicted next</span>
-    </div>
-    <div id="graphHint">click a node: inject failure · hover: metrics</div>
-    <div id="tooltip"></div>
-  </div>
-
-  <div id="sidePanel">
-    <div class="panel">
-      <div class="panel-title">🎯 Root Cause Analysis</div>
-      <div class="card-body" id="rcaBody"><div class="empty">No anomalies detected. System nominal.</div></div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">⚠ Predicted Next Failures</div>
-      <div id="predBody"><div class="empty">No services at risk.</div></div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">🧠 Recovery Strategy Optimizer</div>
-      <div id="recBody"><div class="empty">Awaiting incident…</div></div>
-    </div>
-  </div>
-
-  <div class="panel" id="logsPanel">
-    <div class="panel-title"><span>Live Log Stream</span><span id="logCount">0 lines</span></div>
-    <div id="logs"><div class="empty">connecting to live stream…</div></div>
-  </div>
-</main>
-
-<script src="/static/app.js"></script>
-</body>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <dialog id="helpDialog">
+      <div class="dialog-head">
+        <span class="eyebrow">OPERATOR GUIDE</span
+        ><button id="closeHelp" aria-label="Close guide">✕</button>
+      </div>
+      <h2>From a weak signal<br />to a recovery decision.</h2>
+      <ol>
+        <li>
+          <b>Run a scenario.</b> A seeded fault degrades one dependency. Every
+          scenario resets this shared sandbox.
+        </li>
+        <li>
+          <b>Follow the evidence.</b> Robust anomaly scores compare recent
+          latency and errors to a rolling baseline. Dependency propagation flags
+          exposed callers.
+        </li>
+        <li>
+          <b>Inspect the origin.</b> Root cause ranking favors anomalies not
+          explained by failing dependencies. Evidence strength is a heuristic,
+          not a calibrated probability.
+        </li>
+        <li>
+          <b>Compare and recover.</b> Five copies of the simulator run for 40
+          simulated seconds with identical random streams. Apply an action, then
+          watch observed health recover.
+        </li>
+      </ol>
+      <p>
+        Telemetry, fault injection, and remediation are synthetic. Recovery
+        trials can inspect simulated fault state; this is a digital-twin
+        prototype, not a production integration. A circuit breaker isolates the
+        source temporarily and may sacrifice functionality.
+      </p>
+      <p>
+        All visitors share this sandbox. Resetting or running a scenario affects
+        every viewer. Export captures the currently buffered telemetry,
+        analysis, and action history.
+      </p>
+      <button id="startGuide" class="button primary">
+        Explore the workspace →
+      </button>
+    </dialog>
+    <script src="/static/app.js"></script>
+  </body>
 </html>

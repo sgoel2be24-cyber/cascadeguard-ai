@@ -1,41 +1,86 @@
-# ORCATHON Submission Cheat-Sheet
+# CascadeGuard AI — submission kit
 
-## Submission Form Answers
+## Copy-ready form fields
 
-- **Project Name:** CascadeGuard AI
-- **Live Project Link:** https://afford-fairy-mileage-penguin.trycloudflare.com
-- **GitHub Repository:** https://github.com/sgoel2be24-cyber/cascadeguard-ai
-- **Tools Used:** Python 3, FastAPI, Uvicorn (WebSockets), vanilla JavaScript + HTML5 Canvas (zero frontend dependencies), Cloudflare Tunnel (hosting), AI-assisted development (OpenCode) — disclosed per rules.
-- **Pre-Built Disclosure:** No pre-built code. Entire project (simulator, prediction engine, dashboard) written from scratch during the hackathon window. AI tools were used for development assistance, as permitted.
-- **Team:** sgoel2be24-cyber (solo)
+**Project name:** CascadeGuard AI
 
-## Video Script (~2.5–3 min)
+**Tagline:** See the cascade. Stop the outage.
 
-**[0:00–0:20] Hook**
-"In modern distributed systems, one failing database silently takes down everything that depends on it — and teams only react after the crash. CascadeGuard AI predicts the cascade *before* it happens, pinpoints the root cause, and tells you the single best recovery action."
+**Track:** 01 — Software & AI (track assignment supplied in the project handover).
 
-**[0:20–0:45] Healthy system tour**
-- Show the dashboard: 17-service dependency graph, live logs streaming, system risk gauge at low %.
-- "Every node streams metrics — latency, error rate, CPU — just like real telemetry."
+**Live project:** https://afford-fairy-mileage-penguin.trycloudflare.com
 
-**[0:45–1:20] Inject failure → prediction**
-- Click a leaf node (e.g. **payment-db**) or the Inject Failure button.
-- Narrate as it unfolds: "Within seconds the engine's anomaly detection fires… watch the amber ring — it's predicting payment-service will fail in ~30 seconds, before a single alert has fired. The cascade path lights up in red: payment-db → payment-service → order-service → api-gateway."
+**GitHub:** https://github.com/sgoel2be24-cyber/cascadeguard-ai
 
-**[1:20–1:50] Root cause + optimizer**
-- "Root cause analysis: payment-db, 97% confidence, with evidence — CPU saturated, memory pressure. Not the gateway, not the API — the database."
-- "Now the recovery optimizer: it simulates every strategy as a counterfactual — restart, failover, scale-out, circuit breaker, rollback — and scores each by risk reduction per second of downtime. Failover wins."
+**Video:** REQUIRED — record the actual final app and replace this field with a publicly accessible / unlisted video URL.
 
-**[1:50–2:20] Remediate live**
-- Click **Auto-Remediate**. Nodes go green, gauge drops, timeline logs the fix.
-- "System recovered — and the incident timeline has the full audit trail."
+**Participant:** Shikhar · solo · GitHub `sgoel2be24-cyber`. Use your registered full name and required participant details from your registration.
 
-**[2:20–2:40] Close**
-- "Pure Python prediction engine, FastAPI + WebSockets, zero-dependency canvas frontend — all built from scratch in 3 hours. CascadeGuard AI: stop the cascade before it starts."
+**Description:**
+CascadeGuard AI is an explainable reliability command center that demonstrates how a failing dependency can cascade through a distributed system. A live 17-service digital twin emits synthetic metrics and logs. Statistical anomaly detection and graph risk propagation identify a suspected origin and flag exposed callers before they fail. A recovery lab evaluates restart, failover, scale-out, circuit breaker, and rollback using five isolated copies of the same simulator over the next 40 simulated seconds. Operators can compare projected risk reduction against assumed downtime, apply a recovery action, observe the result, and export the incident evidence.
 
-## Recording Tips
+**Problem relevance:**
+A database outage often appears as failures in payment processing, ordering, and the gateway. CascadeGuard connects those symptoms to an actionable origin and makes recovery tradeoffs visible. It is a prototype for operator decision support, with synthetic rather than production telemetry.
 
-- Full-screen the browser (hide bookmarks bar), zoom to 100%.
-- Use QuickTime (Cmd+Shift+5) to record the screen.
-- Do a practice run: Reset → wait healthy → inject → ~40s cascade → remediate.
-- Upload to YouTube/Drive as unlisted; paste link in the form.
+**What is innovative:**
+The same simulation implements fault propagation, recovery execution, and recovery comparison. Identical random streams make the five counterfactual trials comparable. Predictions, origin evidence, dependency impact, strategy costs, and observed recovery are inspectable in one workspace; the comparison is computed from current state rather than a fixed answer.
+
+**Tools used:**
+Python 3.9+, FastAPI, Uvicorn, Pydantic, WebSockets, HTML5 Canvas, vanilla JavaScript, CSS, Cloudflare Tunnel, Git/GitHub. AI-assisted development: OpenCode (initial build, per handover) and OpenAI Codex (polish, validation, tests, documentation). No LLM API, paid AI service, external database, or frontend framework runs in the product.
+
+**Prior work and contribution disclosure:**
+The project owner’s handover states that the initial simulator, prediction engine, API, and dashboard were built during the hackathon on 25 October 2026, with no project code written before the event. Those components already existed before the Codex polish pass. During the polish pass, we improved the recovery model and simulator consistency, added seeded scenarios, input validation and regression tests, redesigned the dashboard, and updated documentation. AI-assisted development and third-party libraries were used. Confirm the initial timing and prior-work statement against your own records before submitting; do not claim independently verified authorship history.
+
+**Validation:**
+Nine automated engine tests passed, including identification of the injected origin across 17 services and three seeds (51 synthetic cases), prediction of a healthy caller before failure, five-strategy forecast/action parity, full-chain recovery, and timed circuit-breaker protection. Fourteen local HTTP/WebSocket smoke checks passed. These validate the simulator prototype, not real-world prediction accuracy.
+
+## Video script · approximately 2 minutes 40 seconds
+
+Narrate what is visible. Do not promise a fixed evidence score, ETA, or always-winning action.
+
+**0:00–0:18 — problem and honest scope**
+“An unhealthy payment database can take down payments, orders, and eventually the gateway. CascadeGuard AI is an explainable incident command center that helps an operator see the cascade and compare recovery actions. This demo uses a live synthetic 17-service digital twin.”
+
+**0:18–0:35 — orient**
+Show the normal overview and enter Focus view. “Here is the topology, with live telemetry every two seconds. Green nodes are healthy. I can inspect any service without changing the system. The payment scenario will inject a reproducible database fault.” Click Run scenario at the end of this segment.
+
+**0:35–0:55 — prediction and evidence**
+“Latency and errors rise at payment-db. The model compares recent observations with a robust baseline and propagates risk through the dependency graph. Notice exposed callers can appear in the forecast while still healthy. When a declining health trend is available, the engine adds an approximate time-to-failure.”
+
+**0:55–1:15 — origin and impact**
+“Root cause ranking favors an anomalous service whose dependencies do not already explain its symptoms. Here is the metric evidence. The impact chain follows payment-db through payment-service and order-service to the gateway. Evidence strength and risk are heuristic scores, not calibrated probabilities.”
+
+**1:15–1:45 — recovery lab and action**
+Scroll to the recovery lab. “Each of these five actions runs through a separate copy of the same simulator for 40 simulated seconds, using the same starting state and random stream. The model compares mean operational risk against taking no action, with an explicit assumed downtime penalty. This is the current best action under those assumptions.” Apply the currently ranked best action before leaving this segment. Do not wait for every caller to fail.
+
+**1:45–2:10 — observed recovery**
+Return to the topology. “The action is logged. Now we watch the actual simulated recovery across subsequent ticks. A circuit breaker temporarily shields callers but does not heal the source; scale-out reduces fault pressure. Those distinctions are represented in both the forecast and execution.” If recovery is gradual, state that rather than claiming it has completed.
+
+**2:10–2:30 — technical credibility**
+“Recovery forecasts do not mutate the live system. Our tests cover origin detection across every service with three seeds, forecast/action parity, circuit-breaker expiry, and full-chain recovery. The app uses Python, FastAPI, WebSockets, and a dependency-free Canvas interface. AI development tools were used and disclosed.”
+
+**2:30–2:40 — close**
+Show export and the final overview. “The exported incident contains the current metrics, analysis, and action history. CascadeGuard AI: predict the dependency impact, explain the origin, and compare recovery before you act.”
+
+## Judge Q&A
+
+**Is this an LLM?** No. It uses statistical anomaly detection, graph propagation, health trends, and simulator-based counterfactual search. No trained ML model or production accuracy claim is presented.
+
+**Is the recovery globally optimal?** It is the best scored action among five choices under a 40-second simulator horizon and assumed downtime costs. Optimality outside those assumptions is not claimed.
+
+**Are predictions hard-coded?** No. The topology and available actions are defined; anomaly evidence, risk, origin ranking, trend ETA, and recovery scores are computed from evolving state. Seeded scenarios make demonstrations repeatable.
+
+**Can it run on real infrastructure?** Not yet. A production version needs telemetry ingestion, fault-state estimation, calibrated uncertainty, persistent storage, authenticated isolation, and controlled remediation integrations. Current recovery trials use simulated fault state.
+
+**Why no cloud database or LLM API?** The core demonstration needs neither. The lightweight stack keeps it reproducible and focuses effort on the judging criteria.
+
+## Final readiness checklist
+
+- [ ] Record the final app and upload the actual demonstration video; test access in a private window.
+- [ ] Check the live URL and GitHub URL from another browser/device.
+- [ ] Verify the registered participant details and prior-work timeline.
+- [ ] Include both OpenCode and OpenAI Codex in AI tools disclosure.
+- [ ] Submit all fields and capture the submission confirmation.
+- [ ] Keep the machine awake, server running, and current tunnel alive until judging ends.
+
+**Deadline discrepancy:** The official Unstop submission stage says 4:30 PM IST on 25 October 2026, while its long description says 3:30 PM final submission and 3:15 PM build/deployment. Observed during the polish pass. Use the earlier 3:15 / 3:30 targets unless the organizers explicitly confirm otherwise. Source: https://unstop.com/hackathons/orca-coders-orcathon-devharbour-1768929

@@ -1,394 +1,551 @@
-/* CascadeGuard AI — live dashboard client */
-
-const graphCanvas = document.getElementById("graph");
-const gtx = graphCanvas.getContext("2d");
-const gaugeCanvas = document.getElementById("riskGauge");
-const ggtx = gaugeCanvas.getContext("2d");
-const tooltip = document.getElementById("tooltip");
-
-let state = null;          // latest server snapshot
-let nodePos = {};          // service -> {x, y}
-let animFrame = 0;
-let totalLogs = 0;
-
-const STATE_COLORS = {
-  healthy: "#2ecc71",
-  degraded: "#f5a623",
-  critical: "#ff4d5e",
-  failed: "#b8002e",
+"use strict";
+const $ = (id) => document.getElementById(id);
+const graph = $("graph"),
+  ctx = graph.getContext("2d");
+const colors = {
+  healthy: "#5ee7bb",
+  degraded: "#eac16b",
+  critical: "#fa7e8b",
+  failed: "#e54c69",
 };
-
-// ---------------------------------------------------------------- websocket
-
-function renderAll() {
-  renderSidePanels();
-  renderLogs();
-  renderHeader();
-  renderTimeline();
-  computeLayout();
+let state = null,
+  selected = "payment-db",
+  positions = {},
+  frame = 0,
+  width = 760,
+  height = 570;
+let busy = false,
+  paused = false,
+  lastTick = -1,
+  riskHistory = [],
+  lastReceived = 0,
+  toastTimer;
+let socket,
+  reconnectTimer,
+  stale = false;
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const esc = (value) =>
+  String(value).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
+  );
+const pretty = (text) => text.replaceAll("_", " ");
+function toast(message, error = false) {
+  const el = $("toast");
+  el.textContent = message;
+  el.className = "visible" + (error ? " error" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (el.className = ""), 5000);
 }
-
-// instant first paint via REST, then live updates via WebSocket
-fetch("/api/state").then(r => r.json()).then(d => { state = d; renderAll(); });
-
-function connect() {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onmessage = (ev) => {
-    state = JSON.parse(ev.data);
-    renderAll();
-  };
-  ws.onclose = () => setTimeout(connect, 1500);
+function connection(text, mode) {
+  $("connection").textContent = text;
+  $("connection").className = "connection " + mode;
 }
-connect();
-
-// ---------------------------------------------------------------- graph layout
-
-function computeLayout() {
-  if (!state) return;
-  const services = state.services;
-  const w = graphCanvas.width, h = graphCanvas.height;
-  const byLayer = {};
-  for (const [name, s] of Object.entries(services)) {
-    (byLayer[s.layer] = byLayer[s.layer] || []).push(name);
-  }
-  const layers = Object.keys(byLayer).map(Number).sort((a, b) => b - a);
-  const maxLayer = Math.max(...layers);
-  nodePos = {};
-  for (const layer of layers) {
-    const names = byLayer[layer].sort();
-    const x = 90 + ((maxLayer - layer) / Math.max(1, maxLayer)) * (w - 200);
-    names.forEach((n, i) => {
-      const y = 50 + ((i + 0.5) / names.length) * (h - 100);
-      nodePos[n] = { x, y };
+function buttons() {
+  for (const id of ["demoBtn", "chaosBtn", "resetBtn"])
+    $(id).disabled = busy || !state || stale;
+  $("autoFixBtn").disabled =
+    busy ||
+    stale ||
+    !state?.analysis.root_cause ||
+    !state?.analysis.recommendations.length;
+  document
+    .querySelectorAll("[data-strategy]")
+    .forEach((b) => (b.disabled = busy || stale));
+}
+async function refresh() {
+  const res = await fetch("/api/state", {
+    cache: "no-store",
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw Error("Telemetry unavailable");
+  receive(await res.json());
+}
+async function action(path, body, message) {
+  if (busy) return;
+  busy = true;
+  buttons();
+  try {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(12000),
     });
+    if (!res.ok) {
+      const d = await res.json();
+      throw Error(typeof d.detail === "string" ? d.detail : "Action rejected");
+    }
+    if (path === "/api/reset" || path === "/api/scenario") {
+      riskHistory = [];
+      lastTick = -1;
+    }
+    await refresh();
+    toast(message);
+  } catch (error) {
+    toast(error.message || "Connection interrupted. Try again.", true);
+  } finally {
+    busy = false;
+    buttons();
   }
 }
-
-function resizeGraph() {
-  const r = graphCanvas.getBoundingClientRect();
-  graphCanvas.width = r.width * devicePixelRatio;
-  graphCanvas.height = r.height * devicePixelRatio;
-  gtx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-  graphCanvas.width = r.width;
-  graphCanvas.height = r.height;
-  computeLayout();
+function receive(data) {
+  state = data;
+  lastReceived = Date.now();
+  stale = false;
+  render();
 }
-window.addEventListener("resize", resizeGraph);
-
-// ---------------------------------------------------------------- graph render
-
-function drawGraph() {
-  animFrame++;
-  const w = graphCanvas.width, h = graphCanvas.height;
-  gtx.clearRect(0, 0, w, h);
-
-  // background grid
-  gtx.strokeStyle = "rgba(34,48,71,.25)";
-  gtx.lineWidth = 0.5;
-  for (let x = 0; x < w; x += 40) { gtx.beginPath(); gtx.moveTo(x, 0); gtx.lineTo(x, h); gtx.stroke(); }
-  for (let y = 0; y < h; y += 40) { gtx.beginPath(); gtx.moveTo(0, y); gtx.lineTo(w, y); gtx.stroke(); }
-
-  if (!state) { requestAnimationFrame(drawGraph); return; }
-  if (!Object.keys(nodePos).length) computeLayout();
-
-  const services = state.services;
-  const analysis = state.analysis;
-  const risk = analysis.risk || {};
-  const cascadePath = new Set(analysis.cascade_path || []);
-  const predicted = new Set((analysis.predictions || []).map(p => p.service));
-  const pulse = (Math.sin(animFrame / 12) + 1) / 2;   // 0..1
-
-  // edges
-  for (const [name, s] of Object.entries(services)) {
-    for (const dep of s.deps) {
-      const a = nodePos[name], b = nodePos[dep];
-      if (!a || !b) continue;
-      const depRisk = risk[dep] || 0;
-      const inCascade = cascadePath.has(name) && cascadePath.has(dep);
-      gtx.strokeStyle = inCascade
-        ? `rgba(255,77,94,${0.5 + pulse * 0.5})`
-        : depRisk > 0.4
-          ? `rgba(245,166,35,${0.3 + depRisk * 0.4})`
-          : "rgba(60,80,110,.45)";
-      gtx.lineWidth = inCascade ? 2.5 : 1.2;
-      gtx.beginPath();
-      gtx.moveTo(a.x, a.y);
-      const mx = (a.x + b.x) / 2;
-      gtx.bezierCurveTo(mx, a.y, mx, b.y, b.x, b.y);
-      gtx.stroke();
-
-      // animated packet flowing toward dependency when risk high
-      if (depRisk > 0.35) {
-        const t = (animFrame % 60) / 60;
-        const x = cubic(a.x, mx, mx, b.x, t);
-        const y = cubic(a.y, a.y, b.y, b.y, t);
-        gtx.fillStyle = `rgba(255,77,94,${depRisk})`;
-        gtx.beginPath();
-        gtx.arc(x, y, 2.5, 0, Math.PI * 2);
-        gtx.fill();
+function connect() {
+  clearTimeout(reconnectTimer);
+  socket = new WebSocket(
+    `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`,
+  );
+  socket.onopen = () => connection("Live · 2s", "live");
+  socket.onmessage = (e) => {
+    try {
+      receive(JSON.parse(e.data));
+      connection("Live · 2s", "live");
+    } catch {
+      toast("Unable to read telemetry frame", true);
+    }
+  };
+  socket.onclose = () => {
+    stale = true;
+    connection("Reconnecting…", "offline");
+    buttons();
+    reconnectTimer = setTimeout(connect, 1800);
+  };
+  socket.onerror = () => socket.close();
+}
+setInterval(() => {
+  if (lastReceived && Date.now() - lastReceived > 7000) {
+    stale = true;
+    connection("Telemetry stale", "offline");
+    buttons();
+  }
+  if (!socket || socket.readyState !== WebSocket.OPEN)
+    refresh()
+      .then(() => connection("Polling · retrying live", ""))
+      .catch(() => {});
+}, 5000);
+function layout() {
+  if (!state) return;
+  const layers = {};
+  for (const [n, s] of Object.entries(state.services))
+    (layers[s.layer] ??= []).push(n);
+  const max = Math.max(...Object.keys(layers).map(Number));
+  positions = {};
+  for (const [l, names] of Object.entries(layers)) {
+    names.sort();
+    names.forEach(
+      (n, i) =>
+        (positions[n] = {
+          x: 65 + ((max - Number(l)) / max) * (width - 210),
+          y: 47 + ((i + 0.5) / names.length) * (height - 90),
+        }),
+    );
+  }
+}
+function resize() {
+  const rect = graph.getBoundingClientRect();
+  width = rect.width;
+  height = rect.height;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  graph.width = Math.round(width * dpr);
+  graph.height = Math.round(height * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  layout();
+}
+new ResizeObserver(resize).observe(graph);
+const cubic = (a, b, c, d, t) =>
+  (1 - t) ** 3 * a +
+  3 * (1 - t) ** 2 * t * b +
+  3 * (1 - t) * t * t * c +
+  t ** 3 * d;
+function draw() {
+  frame++;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#28425655";
+  for (let x = 15; x < width; x += 24)
+    for (let y = 22; y < height; y += 24) {
+      ctx.beginPath();
+      ctx.arc(x, y, 0.65, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  if (state) {
+    const a = state.analysis,
+      risk = a.risk,
+      root = a.root_cause?.service;
+    const chain = new Set([root, ...a.cascade_path]);
+    const predicted = new Set(a.predictions.map((p) => p.service));
+    for (const [name, s] of Object.entries(state.services)) {
+      for (const dep of s.deps) {
+        const p = positions[name],
+          q = positions[dep];
+        if (!p || !q) continue;
+        const hot = chain.has(name) && chain.has(dep);
+        ctx.strokeStyle = state.services[dep].isolated
+          ? "#70adce"
+          : hot
+            ? "#fa7e8b88"
+            : "#34465b80";
+        ctx.lineWidth = hot ? 1.6 : 1;
+        ctx.setLineDash(state.services[dep].isolated ? [4, 5] : []);
+        const mx = (p.x + q.x) / 2;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.bezierCurveTo(mx, p.y, mx, q.y, q.x, q.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        if (hot && !reducedMotion) {
+          const t = 1 - (frame % 130) / 130;
+          ctx.fillStyle = "#fa7e8b";
+          ctx.beginPath();
+          ctx.arc(
+            cubic(p.x, mx, mx, q.x, t),
+            cubic(p.y, p.y, q.y, q.y, t),
+            2.5,
+            0,
+            Math.PI * 2,
+          );
+          ctx.fill();
+        }
       }
     }
-  }
-
-  // nodes
-  for (const [name, s] of Object.entries(services)) {
-    const p = nodePos[name];
-    if (!p) continue;
-    const r = risk[name] || 0;
-    const color = STATE_COLORS[s.state];
-    const radius = 15 + r * 7;
-
-    // predicted-at-risk amber ring
-    if (predicted.has(name) && s.state !== "failed") {
-      gtx.strokeStyle = `rgba(245,166,35,${0.4 + pulse * 0.6})`;
-      gtx.lineWidth = 2;
-      gtx.beginPath();
-      gtx.arc(p.x, p.y, radius + 6 + pulse * 3, 0, Math.PI * 2);
-      gtx.stroke();
+    for (const [name, s] of Object.entries(state.services)) {
+      const p = positions[name];
+      if (!p) continue;
+      const col = colors[s.state],
+        r = 15;
+      const pulse = reducedMotion ? 0.5 : (Math.sin(frame / 22) + 1) / 2;
+      if (predicted.has(name)) {
+        ctx.strokeStyle = "#eac16b88";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r + 5 + pulse * 2, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if (name === selected) {
+        ctx.strokeStyle = "#bdd9f0";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 25, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.shadowColor = col;
+      ctx.shadowBlur = s.state === "healthy" ? 5 : 13;
+      ctx.fillStyle = "#101c28";
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(
+        p.x,
+        p.y,
+        r - 5,
+        -Math.PI / 2,
+        -Math.PI / 2 + Math.PI * 2 * s.health,
+      );
+      ctx.stroke();
+      ctx.fillStyle = col;
+      ctx.font = "8px ui-monospace,Menlo,monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const codes = {
+        "api-gateway": "AG",
+        "auth-service": "AU",
+        "order-service": "OR",
+        "product-service": "PR",
+        "payment-service": "PA",
+        "inventory-service": "IN",
+        "search-service": "SE",
+        "fraud-detector": "FD",
+        "user-db": "UD",
+        "order-db": "OD",
+        "product-db": "PG",
+        "payment-db": "PD",
+        "inventory-db": "ID",
+        "redis-cache": "RC",
+        "elastic-cluster": "EC",
+        "message-queue": "MQ",
+        "ml-model-store": "ML",
+      };
+      ctx.fillText(codes[name], p.x, p.y);
+      ctx.textBaseline = "alphabetic";
+      ctx.fillStyle = name === selected ? "#fff" : "#b7c7d8";
+      ctx.font = "9px ui-monospace,Menlo,monospace";
+      ctx.textAlign = s.layer === 0 ? "left" : "center";
+      ctx.fillText(
+        name,
+        s.layer === 0 ? p.x + 25 : p.x,
+        s.layer === 0 ? p.y - 2 : p.y + 29,
+      );
+      ctx.fillStyle = "#6f859d";
+      ctx.font = "8px ui-monospace,Menlo,monospace";
+      ctx.fillText(
+        `${Math.round(s.health * 100)}% health${s.isolated ? " · isolated" : ""}`,
+        s.layer === 0 ? p.x + 25 : p.x,
+        s.layer === 0 ? p.y + 12 : p.y + 41,
+      );
     }
-
-    // glow
-    const grad = gtx.createRadialGradient(p.x, p.y, 2, p.x, p.y, radius * 2.2);
-    grad.addColorStop(0, color + "55");
-    grad.addColorStop(1, "transparent");
-    gtx.fillStyle = grad;
-    gtx.beginPath();
-    gtx.arc(p.x, p.y, radius * 2.2, 0, Math.PI * 2);
-    gtx.fill();
-
-    // body
-    gtx.fillStyle = "#111722";
-    gtx.strokeStyle = color;
-    gtx.lineWidth = 2.5;
-    gtx.beginPath();
-    gtx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-    gtx.fill();
-    gtx.stroke();
-
-    // inner health arc
-    gtx.strokeStyle = color;
-    gtx.lineWidth = 3;
-    gtx.beginPath();
-    gtx.arc(p.x, p.y, radius - 5, -Math.PI / 2,
-            -Math.PI / 2 + Math.PI * 2 * s.health);
-    gtx.stroke();
-
-    // node initials
-    gtx.fillStyle = color;
-    gtx.font = "bold 10px Menlo, monospace";
-    gtx.textAlign = "center";
-    gtx.textBaseline = "middle";
-    const CODES = {
-      "api-gateway":"AG","auth-service":"AU","order-service":"OR","product-service":"PR",
-      "payment-service":"PA","inventory-service":"IN","search-service":"SE","fraud-detector":"FD",
-      "user-db":"UD","order-db":"OD","product-db":"PG","payment-db":"PD","inventory-db":"ID",
-      "redis-cache":"RC","elastic-cluster":"EC","message-queue":"MQ","ml-model-store":"ML",
-    };
-    const initials = CODES[name] || name.slice(0, 2).toUpperCase();
-    gtx.fillText(initials, p.x, p.y);
-    gtx.textBaseline = "alphabetic";
-
-    // labels
-    gtx.fillStyle = "#dbe4f0";
-    gtx.font = "11px Menlo, monospace";
-    gtx.textAlign = "center";
-    gtx.fillText(name, p.x, p.y + radius + 15);
-    gtx.fillStyle = "#7a8aa0";
-    gtx.font = "9px Menlo, monospace";
-    gtx.fillText(`${(s.error_rate * 100).toFixed(0)}% err · ${s.latency.toFixed(0)}ms`,
-                 p.x, p.y + radius + 27);
   }
-
-  requestAnimationFrame(drawGraph);
+  requestAnimationFrame(draw);
 }
-
-function cubic(a, b, c, d, t) {
-  const mt = 1 - t;
-  return mt * mt * mt * a + 3 * mt * mt * t * b + 3 * mt * t * t * c + t * t * t * d;
+function pick(event) {
+  const rect = graph.getBoundingClientRect();
+  const x = event.clientX - rect.left,
+    y = event.clientY - rect.top;
+  return Object.keys(positions).find(
+    (n) => Math.hypot(positions[n].x - x, positions[n].y - y) < 24,
+  );
 }
-
-// ---------------------------------------------------------------- interactions
-
-graphCanvas.addEventListener("click", (ev) => {
-  const name = pickNode(ev);
-  if (name) fetch("/api/chaos", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ service: name }),
-  });
+graph.addEventListener("click", (e) => {
+  const n = pick(e);
+  if (n) {
+    selected = n;
+    $("serviceSelect").value = n;
+    renderInspection();
+    renderLogs();
+  }
 });
-
-graphCanvas.addEventListener("mousemove", (ev) => {
-  const name = pickNode(ev);
-  if (!name || !state) { tooltip.style.display = "none"; return; }
-  const s = state.services[name];
-  const r = (state.analysis.risk || {})[name] || 0;
-  tooltip.innerHTML = `
-    <h4>${name}</h4>
-    <div class="tt-row"><span>state</span><b>${s.state}</b></div>
-    <div class="tt-row"><span>health</span><b>${(s.health * 100).toFixed(0)}%</b></div>
-    <div class="tt-row"><span>cascade risk</span><b>${(r * 100).toFixed(0)}%</b></div>
-    <div class="tt-row"><span>latency</span><b>${s.latency.toFixed(0)} ms</b></div>
-    <div class="tt-row"><span>error rate</span><b>${(s.error_rate * 100).toFixed(1)}%</b></div>
-    <div class="tt-row"><span>cpu / mem</span><b>${s.cpu.toFixed(0)}% / ${s.mem.toFixed(0)}%</b></div>`;
-  const rect = graphCanvas.getBoundingClientRect();
-  tooltip.style.display = "block";
-  tooltip.style.left = (ev.clientX - rect.left + 18) + "px";
-  tooltip.style.top = (ev.clientY - rect.top - 10) + "px";
-});
-graphCanvas.addEventListener("mouseleave", () => tooltip.style.display = "none");
-
-function pickNode(ev) {
-  const rect = graphCanvas.getBoundingClientRect();
-  const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
-  for (const [name, p] of Object.entries(nodePos)) {
-    if (Math.hypot(p.x - x, p.y - y) < 26) return name;
-  }
-  return null;
-}
-
-// ---------------------------------------------------------------- side panels
-
-function renderSidePanels() {
-  const a = state.analysis;
-
-  // root cause
-  const rca = document.getElementById("rcaBody");
-  if (a.root_cause) {
-    const rc = a.root_cause;
-    rca.innerHTML = `
-      <div class="rc-service">⚠ ${rc.service}</div>
-      <div class="conf-bar"><div class="conf-fill" style="width:${rc.confidence * 100}%"></div></div>
-      <div class="conf-label">confidence ${(rc.confidence * 100).toFixed(0)}%</div>
-      <ul class="evidence">${rc.evidence.map(e => `<li>${e}</li>`).join("")}</ul>
-      <div class="affected">cascade path: <b>${a.cascade_path.join(" → ") || "—"}</b></div>`;
-  } else {
-    rca.innerHTML = `<div class="empty">No anomalies detected. System nominal.</div>`;
-  }
-
-  // predictions
-  const pred = document.getElementById("predBody");
-  if (a.predictions && a.predictions.length) {
-    pred.innerHTML = a.predictions.map(p => {
-      const pct = Math.round(p.risk * 100);
-      const col = pct > 70 ? "var(--red)" : pct > 40 ? "var(--amber)" : "var(--green)";
-      const eta = p.eta_ticks ? p.eta_label : "upstream";
-      return `<div class="pred-row">
-        <span class="pred-name">${p.service}</span>
-        <div class="risk-bar"><div class="risk-fill" style="width:${pct}%;background:${col}"></div></div>
-        <span class="pred-eta">${p.state === "failed" ? "FAILED" : "ETA " + eta}</span>
-      </div>`;
-    }).join("");
-  } else {
-    pred.innerHTML = `<div class="empty">No services at risk.</div>`;
-  }
-
-  // recommendations
-  const rec = document.getElementById("recBody");
-  if (a.recommendations && a.recommendations.length && a.root_cause) {
-    rec.innerHTML = a.recommendations.map((r, i) => `
-      <div class="rec-row ${i === 0 ? "best" : ""}">
-        <span class="rec-name">${r.strategy.replace("_", " ")}${i === 0 ? '<span class="tag">BEST</span>' : ""}</span>
-        <span class="rec-desc">${r.desc}<br>−${r.risk_reduction.toFixed(1)} risk · ${r.downtime_s}s downtime</span>
-        <span class="rec-score">${r.score.toFixed(2)}</span>
-        <button onclick="applyFix('${a.root_cause.service}', '${r.strategy}')">Apply</button>
-      </div>`).join("");
-  } else {
-    rec.innerHTML = `<div class="empty">Awaiting incident…</div>`;
-  }
-}
-
-function applyFix(service, strategy) {
-  fetch("/api/fix", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ service, strategy }),
-  });
-}
-
-// ---------------------------------------------------------------- logs
-
-function renderLogs() {
-  const el = document.getElementById("logs");
-  totalLogs += 2;
-  document.getElementById("logCount").textContent = `${state.logs.length} buffered`;
-  el.innerHTML = state.logs.slice().reverse().map(l =>
-    `<div class="log-line"><span class="log-ts">${l.ts}</span> ` +
-    `<span class="log-${l.level}">[${l.level}]</span> ` +
-    `<span class="log-svc">${l.service}:</span> ${l.msg}</div>`
-  ).join("");
-}
-
-// ---------------------------------------------------------------- timeline
-
-function renderTimeline() {
-  const el = document.getElementById("tlEvents");
-  const evs = state.events || [];
-  if (!evs.length) {
-    el.innerHTML = `<span class="tl-empty">no incidents yet — inject a failure to begin</span>`;
+graph.addEventListener("mousemove", (e) => {
+  const n = pick(e);
+  if (!n || !state) {
+    $("tooltip").style.display = "none";
     return;
   }
-  el.innerHTML = evs.map(e =>
-    e.type === "chaos"
-      ? `<span class="tl-event chaos">⚡ tick ${e.tick}: failure injected → ${e.service}</span>`
-      : `<span class="tl-event fix">🛠 tick ${e.tick}: ${e.strategy.replace("_", " ")} applied → ${e.service}</span>`
-  ).join("");
-  el.parentElement.scrollLeft = el.parentElement.scrollWidth;
+  const s = state.services[n],
+    rect = graph.getBoundingClientRect();
+  $("tooltip").innerHTML =
+    `<b>${esc(n)}</b><br>${esc(s.state)} · ${Math.round(s.health * 100)}% health<br>${s.latency.toFixed(0)} ms · ${(s.error_rate * 100).toFixed(1)}% errors<br>Click to inspect telemetry`;
+  $("tooltip").style.display = "block";
+  $("tooltip").style.left =
+    Math.min(width - 240, Math.max(0, e.clientX - rect.left + 16)) + "px";
+  $("tooltip").style.top =
+    Math.min(height - 110, e.clientY - rect.top + 12) + "px";
+});
+graph.addEventListener(
+  "mouseleave",
+  () => ($("tooltip").style.display = "none"),
+);
+function renderInspection() {
+  if (!state) return;
+  const s = state.services[selected];
+  $("inspection").innerHTML =
+    `<b>${esc(selected)}</b><span style="color:${colors[s.state]}">${esc(s.state.toUpperCase())}</span>${s.isolated ? " · CIRCUIT OPEN" : ""}<br>Health <b>${Math.round(s.health * 100)}%</b> Latency <b>${s.latency.toFixed(0)} ms</b> Errors <b>${(s.error_rate * 100).toFixed(1)}%</b> CPU <b>${s.cpu.toFixed(0)}%</b> Memory <b>${s.mem.toFixed(0)}%</b>`;
 }
-
-// ---------------------------------------------------------------- header
-
-function renderHeader() {
-  const pill = document.getElementById("statusPill");
-  const services = Object.values(state.services);
-  const failed = services.filter(s => s.state === "failed").length;
-  const bad = services.filter(s => s.state === "critical" || s.state === "degraded").length;
-  const sysRisk = state.analysis.system_risk / services.length;
-
-  let cls, label;
-  if (failed > 0 || sysRisk > 0.45)      { cls = "status-critical"; label = "CASCADE IN PROGRESS"; }
-  else if (bad > 0 || sysRisk > 0.2)     { cls = "status-degraded"; label = "ANOMALY DETECTED"; }
-  else                                   { cls = "status-healthy";  label = "SYSTEM HEALTHY"; }
-  pill.className = "status-pill " + cls;
-  pill.textContent = label;
-  document.getElementById("tickLabel").textContent = `tick ${state.tick}`;
-
-  // gauge
-  const w = gaugeCanvas.width, h = gaugeCanvas.height;
-  ggtx.clearRect(0, 0, w, h);
-  const pct = Math.min(1, sysRisk * 2);   // amplify: 50% mean risk = full bar
-  ggtx.fillStyle = "#161e2c";
-  ggtx.beginPath();
-  ggtx.roundRect(0, 16, w, 16, 8);
-  ggtx.fill();
-  const grad = ggtx.createLinearGradient(0, 0, w, 0);
-  grad.addColorStop(0, "#2ecc71");
-  grad.addColorStop(0.5, "#f5a623");
-  grad.addColorStop(1, "#ff4d5e");
-  ggtx.fillStyle = grad;
-  ggtx.beginPath();
-  ggtx.roundRect(0, 16, Math.max(10, w * pct), 16, 8);
-  ggtx.fill();
-  ggtx.fillStyle = "#dbe4f0";
-  ggtx.font = "bold 13px Menlo, monospace";
-  ggtx.textAlign = "left";
-  ggtx.fillText((pct * 100).toFixed(0) + "%", 2, 12);
+function render() {
+  const a = state.analysis,
+    services = Object.values(state.services),
+    rc = a.root_cause;
+  const healthy = services.filter((s) => s.state === "healthy").length,
+    failed = services.filter((s) => s.state === "failed").length,
+    risk = (a.system_risk / services.length) * 100;
+  $("healthyCount").textContent = healthy;
+  $("healthDetail").textContent =
+    `${services.length - healthy} affected · ${failed} failed · ${state.tick * 2}s simulated`;
+  $("statusPill").textContent = failed
+    ? "CASCADE ACTIVE"
+    : rc
+      ? "ANOMALY DETECTED"
+      : "SYSTEM NOMINAL";
+  $("statusPill").style.color = failed
+    ? "var(--red)"
+    : rc
+      ? "var(--amber)"
+      : "var(--green)";
+  $("riskValue").textContent = risk.toFixed(0);
+  $("exposureCount").textContent = a.cascade_path.length;
+  $("exposureDetail").textContent = rc
+    ? `Potential downstream reach from ${rc.service}`
+    : "No anomalous origin detected";
+  $("recoveryValue").textContent = a.recommendations.length
+    ? "−" + a.recommendations[0].risk_reduction.toFixed(1)
+    : "—";
+  $("recoveryDetail").textContent = a.recommendations.length
+    ? `40s mean risk reduction · ${pretty(a.recommendations[0].strategy)}`
+    : "Compare actions when an incident is detected";
+  $("tickLabel").textContent =
+    `T+${String(state.tick * 2).padStart(3, "0")}s · tick ${state.tick}`;
+  if (state.tick !== lastTick) {
+    riskHistory.push(risk);
+    riskHistory = riskHistory.slice(-35);
+    lastTick = state.tick;
+  }
+  $("riskSpark").setAttribute(
+    "points",
+    riskHistory
+      .map(
+        (r, i) =>
+          `${(i / Math.max(1, riskHistory.length - 1)) * 120},${33 - (r / 100) * 30}`,
+      )
+      .join(" "),
+  );
+  if (!$("serviceSelect").options.length) {
+    $("serviceSelect").innerHTML = Object.keys(state.services)
+      .sort()
+      .map((n) => `<option>${esc(n)}</option>`)
+      .join("");
+    $("serviceSelect").value = selected;
+  }
+  $("rcaBody").innerHTML = rc
+    ? `<div class="overline">SUSPECTED ORIGIN</div><div class="rc-service">${esc(rc.service)}</div><div class="strength"><span>Evidence strength</span><span>${Math.round(rc.confidence * 100)} / 100</span></div><div class="conf-bar"><div class="conf-fill" style="width:${rc.confidence * 100}%"></div></div><ul class="evidence">${rc.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>`
+    : `<div class="empty"><div class="empty-icon">✓</div><strong>No anomalous origin detected</strong>Run a scenario to see evidence build as the dependency degrades.</div>`;
+  $("predBody").innerHTML = a.predictions.length
+    ? a.predictions
+        .map(
+          (p) =>
+            `<div class="pred-row"><div class="pred-top"><span>${esc(p.service)}</span><span style="color:var(--amber)">${Math.round(p.risk * 100)} / 100</span></div><div class="risk-bar"><div class="risk-fill" style="width:${p.risk * 100}%"></div></div><div class="pred-meta"><span>${esc(p.state)}</span><span>${p.eta_ticks ? "Est. failure " + esc(p.eta_label) : "Dependency exposure"}</span></div></div>`,
+        )
+        .join("")
+    : `<div class="empty"><strong>No imminent cascade signal</strong>Services are within the model’s normal operating range.</div>`;
+  $("chainBody").innerHTML = rc
+    ? a.cascade_layers
+        .map(
+          (layer, i) =>
+            `<div class="chain-step"><span>${i ? "↑" : "●"} ${String(i).padStart(2, "0")}</span><div>${layer.map((n) => `<b>${esc(n)}</b>`).join("")}</div></div>`,
+        )
+        .join("")
+    : `<div class="empty"><strong>Contain the blast radius</strong>The dependency graph reveals which callers could inherit the failure.</div>`;
+  $("recoveryContext").innerHTML = rc
+    ? `Target: <b>${esc(rc.service)}</b> · Without intervention: <b>${a.baseline_forecast.toFixed(1)} / 100</b> forecast mean operational risk. Compare the same next 40 seconds under each action.`
+    : "An incident unlocks five recovery trials. Each runs the same simulator with a different action.";
+  const templates = [
+    ["failover", "Switch to a standby replica"],
+    ["restart", "Restart unhealthy instances"],
+    ["scale_out", "Add service capacity"],
+    ["circuit_breaker", "Isolate a failing dependency"],
+    ["rollback", "Revert the last deployment"],
+  ];
+  $("recBody").innerHTML = a.recommendations.length
+    ? a.recommendations
+        .map(
+          (r, i) =>
+            `<article class="strategy ${i === 0 ? "best" : ""}"><div class="strategy-top"><span>0${i + 1} / UTILITY ${r.score.toFixed(1)}</span>${i === 0 ? '<span class="badge">BEST</span>' : ""}</div><h3>${esc(pretty(r.strategy))}</h3><p>${esc(r.desc)}</p><div class="strategy-number">−${r.risk_reduction.toFixed(1)}</div><small>mean risk points vs no action</small><div class="strategy-cost">${r.downtime_s}s assumed downtime<br>Projected mean risk ${r.projected_risk.toFixed(1)} / 100</div><button class="button ${i === 0 ? "primary" : "subtle"}" data-strategy="${esc(r.strategy)}" data-target="${esc(rc.service)}">Apply ${esc(pretty(r.strategy))} ↗</button></article>`,
+        )
+        .join("")
+    : templates
+        .map(
+          ([n, d], i) =>
+            `<article class="strategy"><div class="strategy-top">0${i + 1} / STANDBY</div><h3>${pretty(n)}</h3><p>${d}</p><div class="strategy-number" style="color:var(--muted)">—</div><small>Awaiting an incident to evaluate</small></article>`,
+        )
+        .join("");
+  $("eventCount").textContent = `${state.events.length} events`;
+  $("tlEvents").innerHTML = state.events.length
+    ? state.events
+        .slice()
+        .reverse()
+        .map(
+          (e) =>
+            `<div class="tl-event ${e.type === "fix" ? "fix" : ""}"><span class="event-type">${e.type === "fix" ? "RECOVERY APPLIED" : "FAULT INJECTED"} · T+${e.tick * 2}s</span><b>${esc(e.service)}</b><br>${e.type === "fix" ? esc(pretty(e.strategy)) : "Synthetic fault · severity " + Math.round(e.severity * 100) + "%"}</div>`,
+        )
+        .join("")
+    : `<div class="empty"><strong>A clean slate.</strong>Injected faults and recovery actions appear here as you work through an incident.</div>`;
+  renderInspection();
+  renderLogs();
+  layout();
+  buttons();
 }
-
-// ---------------------------------------------------------------- buttons
-
-document.getElementById("chaosBtn").onclick = () =>
-  fetch("/api/chaos", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-
-document.getElementById("resetBtn").onclick = () =>
-  fetch("/api/reset", { method: "POST" });
-
-document.getElementById("autoFixBtn").onclick = () => {
-  if (!state || !state.analysis.root_cause || !state.analysis.recommendations.length) return;
-  const best = state.analysis.recommendations[0];
-  applyFix(state.analysis.root_cause.service, best.strategy);
+function renderLogs() {
+  if (!state || paused) return;
+  let logs = state.logs;
+  const filter = $("logFilter").value;
+  if (filter === "errors")
+    logs = logs.filter((l) => ["ERROR", "CRITICAL"].includes(l.level));
+  if (filter === "selected") logs = logs.filter((l) => l.service === selected);
+  $("logCount").textContent = logs.length + " lines";
+  $("logs").innerHTML = logs.length
+    ? logs
+        .slice()
+        .reverse()
+        .map(
+          (l) =>
+            `<div class="log-line"><span class="log-ts">${esc(l.ts)}</span> <span class="log-${esc(l.level)}">${esc(l.level.padEnd(8))}</span> <span class="log-svc">${esc(l.service)}</span> <span>${esc(l.msg)}</span></div>`,
+        )
+        .join("")
+    : '<div class="empty">No matching log entries yet.</div>';
+}
+$("demoBtn").onclick = () =>
+  action(
+    "/api/scenario",
+    { scenario: $("scenario").value },
+    "Scenario started. Watch the forecast and root-cause evidence.",
+  );
+$("chaosBtn").onclick = () =>
+  action(
+    "/api/chaos",
+    { service: selected },
+    `Fault injected into ${selected}.`,
+  );
+$("resetBtn").onclick = () =>
+  action(
+    "/api/reset",
+    {},
+    "Sandbox reset. Synthetic healthy baseline restored.",
+  );
+$("autoFixBtn").onclick = () => {
+  const a = state?.analysis;
+  if (a?.root_cause && a.recommendations.length)
+    applyFix(a.root_cause.service, a.recommendations[0].strategy);
 };
+function applyFix(service, strategy) {
+  action(
+    "/api/fix",
+    { service, strategy },
+    `${pretty(strategy)} applied to ${service}. Watch health recover.`,
+  );
+}
+$("recBody").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-strategy]");
+  if (b) applyFix(b.dataset.target, b.dataset.strategy);
+});
+$("serviceSelect").onchange = (e) => {
+  selected = e.target.value;
+  renderInspection();
+  renderLogs();
+};
+$("logFilter").onchange = renderLogs;
+$("pauseLogs").onclick = () => {
+  paused = !paused;
+  $("pauseLogs").textContent = paused ? "Resume" : "Pause";
+  $("pauseLogs").setAttribute("aria-pressed", String(paused));
+  if (!paused) renderLogs();
+};
+$("exportBtn").onclick = () => {
+  const a = document.createElement("a");
+  a.href = "/api/report";
+  a.download = "cascadeguard-incident.json";
+  a.click();
+  toast("Incident report download requested.");
+};
+for (const id of ["helpBtn", "methodBtn"])
+  $(id).onclick = () => $("helpDialog").showModal();
+for (const id of ["closeHelp", "startGuide"])
+  $(id).onclick = () => $("helpDialog").close();
+refresh().catch(() => {
+  connection("Unable to connect", "offline");
+  toast("Waiting for the telemetry server…", true);
+});
+connect();
+resize();
+requestAnimationFrame(draw);
 
-resizeGraph();
-requestAnimationFrame(drawGraph);
+function focusView(on) {
+  document.body.classList.toggle("focus-mode", on);
+  $("focusBtn").setAttribute("aria-pressed", String(on));
+  window.scrollTo({ top: 0 });
+  resize();
+}
+$("focusBtn").onclick = () => focusView(true);
+$("focusExit").onclick = () => focusView(false);
