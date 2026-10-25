@@ -8,6 +8,8 @@ An explainable incident command center for **ORCATHON 2026 · Track 01, Software
 
 > This is an interactive **synthetic digital-twin prototype**. It does not monitor a real production system. Risk, evidence strength, time-to-failure, and strategy costs are model estimates; they are not calibrated probabilities or measured production outcomes. All visitors share the same sandbox.
 
+![Recovery strategy explorer comparing failover with no action on a paused synthetic payment incident](docs/recovery-lab.png)
+
 ## Why it matters
 
 A failed payment database can cascade through payment processing, orders, and the gateway. A dashboard that only shows the gateway turning red leaves an operator guessing where to act. CascadeGuard connects a leading anomaly to its dependency impact and a concrete recovery comparison in one workspace.
