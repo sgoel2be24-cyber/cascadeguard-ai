@@ -32,7 +32,7 @@ CascadeGuard AI watches a live microservice topology and:
 │  ┌────────────────┐   ┌───────────────────────┐ │
 │  │ Simulator      │──▶│ Prediction Engine     │ │
 │  │ (simulator.py) │   │ (engine.py)           │ │
-│  │ 18-service DAG │   │ • anomaly z-scores    │ │
+│  │ 17-service DAG │   │ • anomaly z-scores    │ │
 │  │ metric + log   │   │ • cascade fixpoint    │ │
 │  │ stream, chaos  │   │ • root-cause ranking  │ │
 │  │ injection      │   │ • strategy optimizer  │ │

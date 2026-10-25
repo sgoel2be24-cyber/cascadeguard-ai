@@ -20,14 +20,23 @@ const STATE_COLORS = {
 
 // ---------------------------------------------------------------- websocket
 
+function renderAll() {
+  renderSidePanels();
+  renderLogs();
+  renderHeader();
+  renderTimeline();
+  computeLayout();
+}
+
+// instant first paint via REST, then live updates via WebSocket
+fetch("/api/state").then(r => r.json()).then(d => { state = d; renderAll(); });
+
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onmessage = (ev) => {
     state = JSON.parse(ev.data);
-    renderSidePanels();
-    renderLogs();
-    renderHeader();
+    renderAll();
   };
   ws.onclose = () => setTimeout(connect, 1500);
 }
@@ -73,6 +82,13 @@ function drawGraph() {
   animFrame++;
   const w = graphCanvas.width, h = graphCanvas.height;
   gtx.clearRect(0, 0, w, h);
+
+  // background grid
+  gtx.strokeStyle = "rgba(34,48,71,.25)";
+  gtx.lineWidth = 0.5;
+  for (let x = 0; x < w; x += 40) { gtx.beginPath(); gtx.moveTo(x, 0); gtx.lineTo(x, h); gtx.stroke(); }
+  for (let y = 0; y < h; y += 40) { gtx.beginPath(); gtx.moveTo(0, y); gtx.lineTo(w, y); gtx.stroke(); }
+
   if (!state) { requestAnimationFrame(drawGraph); return; }
   if (!Object.keys(nodePos).length) computeLayout();
 
@@ -157,6 +173,21 @@ function drawGraph() {
     gtx.arc(p.x, p.y, radius - 5, -Math.PI / 2,
             -Math.PI / 2 + Math.PI * 2 * s.health);
     gtx.stroke();
+
+    // node initials
+    gtx.fillStyle = color;
+    gtx.font = "bold 10px Menlo, monospace";
+    gtx.textAlign = "center";
+    gtx.textBaseline = "middle";
+    const CODES = {
+      "api-gateway":"AG","auth-service":"AU","order-service":"OR","product-service":"PR",
+      "payment-service":"PA","inventory-service":"IN","search-service":"SE","fraud-detector":"FD",
+      "user-db":"UD","order-db":"OD","product-db":"PG","payment-db":"PD","inventory-db":"ID",
+      "redis-cache":"RC","elastic-cluster":"EC","message-queue":"MQ","ml-model-store":"ML",
+    };
+    const initials = CODES[name] || name.slice(0, 2).toUpperCase();
+    gtx.fillText(initials, p.x, p.y);
+    gtx.textBaseline = "alphabetic";
 
     // labels
     gtx.fillStyle = "#dbe4f0";
@@ -289,6 +320,23 @@ function renderLogs() {
   ).join("");
 }
 
+// ---------------------------------------------------------------- timeline
+
+function renderTimeline() {
+  const el = document.getElementById("tlEvents");
+  const evs = state.events || [];
+  if (!evs.length) {
+    el.innerHTML = `<span class="tl-empty">no incidents yet — inject a failure to begin</span>`;
+    return;
+  }
+  el.innerHTML = evs.map(e =>
+    e.type === "chaos"
+      ? `<span class="tl-event chaos">⚡ tick ${e.tick}: failure injected → ${e.service}</span>`
+      : `<span class="tl-event fix">🛠 tick ${e.tick}: ${e.strategy.replace("_", " ")} applied → ${e.service}</span>`
+  ).join("");
+  el.parentElement.scrollLeft = el.parentElement.scrollWidth;
+}
+
 // ---------------------------------------------------------------- header
 
 function renderHeader() {
@@ -309,10 +357,10 @@ function renderHeader() {
   // gauge
   const w = gaugeCanvas.width, h = gaugeCanvas.height;
   ggtx.clearRect(0, 0, w, h);
-  const pct = Math.min(1, sysRisk);
+  const pct = Math.min(1, sysRisk * 2);   // amplify: 50% mean risk = full bar
   ggtx.fillStyle = "#161e2c";
   ggtx.beginPath();
-  ggtx.roundRect(0, 10, w, 14, 7);
+  ggtx.roundRect(0, 16, w, 16, 8);
   ggtx.fill();
   const grad = ggtx.createLinearGradient(0, 0, w, 0);
   grad.addColorStop(0, "#2ecc71");
@@ -320,12 +368,12 @@ function renderHeader() {
   grad.addColorStop(1, "#ff4d5e");
   ggtx.fillStyle = grad;
   ggtx.beginPath();
-  ggtx.roundRect(0, 10, Math.max(8, w * pct), 14, 7);
+  ggtx.roundRect(0, 16, Math.max(10, w * pct), 16, 8);
   ggtx.fill();
   ggtx.fillStyle = "#dbe4f0";
   ggtx.font = "bold 13px Menlo, monospace";
   ggtx.textAlign = "left";
-  ggtx.fillText((pct * 100).toFixed(0) + "%", 4, 8);
+  ggtx.fillText((pct * 100).toFixed(0) + "%", 2, 12);
 }
 
 // ---------------------------------------------------------------- buttons

@@ -33,7 +33,7 @@ header {
 }
 
 .logo {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
   letter-spacing: 1px;
   background: linear-gradient(90deg, var(--accent), var(--accent2));
@@ -41,9 +41,17 @@ header {
   background-clip: text;
   color: transparent;
   white-space: nowrap;
+  line-height: 1.1;
 }
 
-.logo span { color: var(--muted); -webkit-text-fill-color: var(--muted); font-weight: 400; font-size: 12px; display: block; letter-spacing: 2px;}
+.logo span {
+  -webkit-text-fill-color: var(--muted);
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 9px;
+  display: block;
+  letter-spacing: 3px;
+}
 
 .status-pill {
   padding: 5px 14px;
@@ -61,7 +69,7 @@ header {
 
 .gauge-wrap { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .gauge-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
-#riskGauge { width: 130px; height: 34px; }
+#riskGauge { width: 150px; height: 40px; }
 
 button {
   background: var(--panel2);
@@ -82,13 +90,41 @@ button.primary { border-color: var(--accent); color: var(--accent); }
 button.primary:hover { background: rgba(74,168,255,.15); }
 button:disabled { opacity: .4; cursor: default; }
 
+#timeline {
+  display: flex; align-items: center; gap: 12px;
+  padding: 6px 20px;
+  background: #0d1320;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.tl-label { color: var(--muted); font-size: 10px; letter-spacing: 2px; flex: none; }
+#tlEvents { display: flex; gap: 8px; }
+.tl-empty { color: var(--muted); font-size: 11px; font-style: italic; }
+.tl-event {
+  font-size: 11px; padding: 3px 10px; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--panel2);
+}
+.tl-event.chaos { border-color: var(--red); color: var(--red); }
+.tl-event.fix { border-color: var(--green); color: var(--green); }
+
+#legend {
+  position: absolute; top: 40px; left: 12px;
+  display: flex; gap: 14px; align-items: center;
+  background: rgba(13,19,32,.85); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 12px; font-size: 11px; color: var(--muted);
+}
+#legend span { display: flex; align-items: center; gap: 5px; }
+#legend .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+#legend .ring { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--amber); display: inline-block; }
+
 main {
   display: grid;
-  grid-template-columns: 1fr 380px;
-  grid-template-rows: 1fr 220px;
+  grid-template-columns: 1fr 400px;
+  grid-template-rows: 1fr 210px;
   gap: 10px;
   padding: 10px;
-  height: calc(100vh - 60px);
+  height: calc(100vh - 92px);
 }
 
 .panel {
@@ -121,6 +157,7 @@ main {
 
 #sidePanel { grid-row: 1; grid-column: 2; overflow-y: auto; background: transparent; border: none; gap: 10px; display: flex; flex-direction: column; }
 #sidePanel .panel { flex: none; }
+#sidePanel .panel:last-child { flex: 1; }
 
 .card-body { padding: 10px 14px; }
 

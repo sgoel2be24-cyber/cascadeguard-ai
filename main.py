@@ -61,12 +61,23 @@ async def reset():
     return {"ok": True}
 
 
+async def ticker():
+    """Single background simulation loop — all clients share one world."""
+    while True:
+        sim.tick()
+        await asyncio.sleep(TICK_SECONDS)
+
+
+@app.on_event("startup")
+async def startup():
+    asyncio.create_task(ticker())
+
+
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
     await websocket.accept()
     try:
         while True:
-            sim.tick()
             payload = {**sim.snapshot(), "analysis": engine.analyze(sim)}
             await websocket.send_text(json.dumps(payload))
             await asyncio.sleep(TICK_SECONDS)

@@ -9,16 +9,18 @@
 <body>
 
 <header>
-  <div class="logo">CASCADE<span>GUARD AI</span></div>
+  <div class="logo">CASCADEGUARD<span>AI · FAILURE PREDICTION</span></div>
   <div id="statusPill" class="status-pill status-healthy">SYSTEM HEALTHY</div>
   <div class="gauge-wrap">
     <div class="gauge-label">System<br>Risk</div>
-    <canvas id="riskGauge" width="260" height="68"></canvas>
+    <canvas id="riskGauge" width="150" height="40"></canvas>
   </div>
   <button id="chaosBtn" class="danger">⚡ Inject Failure</button>
   <button id="autoFixBtn" class="primary">🛠 Auto-Remediate</button>
   <button id="resetBtn">↺ Reset Sim</button>
 </header>
+
+<div id="timeline"><span class="tl-label">INCIDENT TIMELINE</span><div id="tlEvents"><span class="tl-empty">no incidents yet — inject a failure to begin</span></div></div>
 
 <main>
   <div class="panel" id="graphPanel">
@@ -27,6 +29,13 @@
       <span id="tickLabel">tick 0</span>
     </div>
     <canvas id="graph"></canvas>
+    <div id="legend">
+      <span><i class="dot" style="background:#2ecc71"></i>healthy</span>
+      <span><i class="dot" style="background:#f5a623"></i>degraded</span>
+      <span><i class="dot" style="background:#ff4d5e"></i>critical</span>
+      <span><i class="dot" style="background:#b8002e"></i>failed</span>
+      <span><i class="ring"></i>predicted next</span>
+    </div>
     <div id="graphHint">click a node: inject failure · hover: metrics</div>
     <div id="tooltip"></div>
   </div>
@@ -48,7 +57,7 @@
 
   <div class="panel" id="logsPanel">
     <div class="panel-title"><span>Live Log Stream</span><span id="logCount">0 lines</span></div>
-    <div id="logs"></div>
+    <div id="logs"><div class="empty">connecting to live stream…</div></div>
   </div>
 </main>
 
