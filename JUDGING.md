@@ -13,8 +13,8 @@ Aligned with the event’s published 100-point rubric. This maps inspectable evi
 
 ## Local evidence recorded during polish
 
-- 10 engine tests passed. One covers all 17 origins with 3 seeds (51 cases).
-- 14 HTTP/WebSocket smoke checks passed on the isolated preview and again through the public HTTPS tunnel, including secure WebSocket streaming.
+- 20 engine/runtime tests passed. One covers all 17 origins with 3 seeds (51 cases).
+- 81 HTTP/WebSocket checks passed on the isolated preview and again through the public HTTPS tunnel, including secure WebSocket streaming.
 - JavaScript syntax check passed.
 - Browser verified: live stream, nominal overview, scenario injection, inferred origin, dependency forecast, strategy cards, and focus layout. A 390px iframe viewport verified responsive behavior; action wrapping and leaf-label overlap were corrected during visual review.
 
@@ -27,3 +27,11 @@ Aligned with the event’s published 100-point rubric. This maps inspectable evi
 - Export is the current buffered snapshot; durable incident storage is future work.
 - Shared memory-only sandbox; visitors can affect each other and server restart clears state.
 - Public tunnel depends on the local machine and existing tunnel process.
+
+## Additional evidence from the second polish pass
+
+- Playback controls make the full cascade explainable one tick at a time and allow honest, visibly accelerated recovery during short presentations.
+- Service health, latency, error rate and CPU trends use observed samples, excluding the seeded reference history.
+- Five selectable counterfactual trajectories can be compared visually with no action. The applied-action view preserves the forecast and adds observed samples.
+- The incident journal preserves the initial inferred origin and measures detection latency, peak affected/failed counts, recovery duration, and healthy-warning-to-failure lead time.
+- 20 engine/runtime tests cover these contracts, including exact stepping, no background advance while paused, retained inferred origin, warning-before-failure ordering, and same-model forecast/observed agreement.

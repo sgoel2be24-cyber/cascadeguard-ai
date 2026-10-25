@@ -59,7 +59,8 @@ flowchart LR
 
 - `simulator.py`: service DAG, local seeded random generator, synthetic metrics/logs, persistent timed isolation, recovery actions. Dependency health is read from the previous tick, so dictionary iteration does not create instant multi-hop propagation.
 - `engine.py`: anomaly scoring, risk propagation, evidence-based origin ranking, trend forecasts, isolated counterfactual trials.
-- `main.py`: validated REST endpoints, cached analysis per simulation tick, WebSocket stream, health endpoint, export; graceful ticker lifecycle and absolute static paths.
+- `runtime.py`: playback controls, tick-based incident journal, inferred initial origin retention, measured warning lead time, observed recovery outcomes and saved forecast comparisons.
+- `main.py`: validated REST endpoints, cached analysis per state revision, WebSocket stream, health endpoint, export; graceful ticker lifecycle and absolute static paths.
 - `static/`: dependency-free responsive dashboard with connection/stale-state feedback, disabled invalid actions, focus mode, keyboard controls, and reduced-motion support.
 - `tests/`: deterministic causal/recovery tests and an optional live API smoke script. GitHub Actions runs engine tests and JavaScript syntax validation.
 
@@ -79,13 +80,14 @@ Use a **single worker**: simulation state is in memory. This prototype is delibe
 ```bash
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 node --check static/app.js
+node --check static/insights.js
 # Optional: run against a separate disposable preview; this resets that sandbox:
 venv/bin/python tests/smoke_api.py http://127.0.0.1:8001
 ```
 
 ## Verification
 
-The local polish pass passed **10 engine tests**, covering nominal stability, root-cause identification across **17 services × 3 seeds**, prediction of a still-healthy caller before failure, forecast/action parity for five strategies, forecast non-mutation and repeatability, full-chain recovery, circuit-breaker isolation and expiry, reset, and invalid strategy rejection. The local HTTP/WebSocket smoke run passed **14 checks** including validation, scenario, remediation, export, and streaming. These are synthetic test results, not real-world accuracy benchmarks.
+The local polish pass passed **20 engine/runtime tests**, covering nominal stability, root-cause identification across **17 services × 3 seeds**, prediction of a still-healthy caller before failure, forecast/action parity for five strategies, forecast non-mutation and repeatability, full-chain recovery, circuit-breaker isolation and expiry, reset, and invalid strategy rejection. The local HTTP/WebSocket smoke run passed **81 checks** including validation, scenario, remediation, export, and streaming. These are synthetic test results, not real-world accuracy benchmarks.
 
 ## API
 
@@ -93,12 +95,14 @@ The local polish pass passed **10 engine tests**, covering nominal stability, ro
 |---|---|
 | `GET /healthz` | Liveness, mode, service count and tick |
 | `GET /api/state` | Current synthetic telemetry and analysis |
-| `WS /ws` | Live state and analysis, every 2 seconds |
+| `WS /ws` | Changed state plus a 2-second heartbeat; supports pause and accelerated ticks |
 | `POST /api/scenario` | Reset and run `{scenario: "payment"\|"cache"\|"search"}` |
 | `POST /api/chaos` | Inject `{service?: "payment-db"}` |
 | `POST /api/fix` | Apply `{service, strategy}` |
 | `POST /api/reset` | Restore a seeded healthy reference state |
-| `GET /api/report` | Download current incident JSON |
+| `GET /api/report` | Download current incident JSON, journal and forecast trajectories |
+| `POST /api/control` | Pause/resume or set wall-clock speed `{paused?: true, speed?: 1\|2\|4}` |
+| `POST /api/step` | Advance exactly one 2-second simulated tick while paused; otherwise returns 409 |
 | `GET /docs` | Interactive OpenAPI documentation |
 
 ## Scope and next steps
@@ -112,3 +116,15 @@ The Cloudflare quick-tunnel URL is temporary and requires the local server, tunn
 Solo project by **Shikhar / [sgoel2be24-cyber](https://github.com/sgoel2be24-cyber)**. The original handover reports that the initial project was built during the event and used no project code written before the event; confirm that timeline against your own records before submitting. The initial simulator, engine, API, and dashboard already existed before this polish pass. This pass improved recovery modeling, validation, reproducibility, interface design, tests, and documentation.
 
 Tools: Python, FastAPI, Uvicorn, Pydantic, WebSockets, vanilla JavaScript, HTML Canvas, CSS, Cloudflare Tunnel, Git/GitHub. AI-assisted development: **OpenCode** for the initial build (per handover), **OpenAI Codex** for this polish pass. No LLM API runs in the product. Third-party framework/library use is distinct from pre-existing project code.
+
+## Second polish pass: operate, compare, verify
+
+- **Pause / Step +2s / 1×–4×:** Freeze the simulation while explaining evidence, advance one causal tick at a time, or accelerate recovery. Simulation timestamps always advance by two seconds per tick. Playback controls are shared. New scenarios preserve playback settings; Reset restores a running 1× world. WebSocket heartbeat continues while paused, so paused and disconnected are visibly distinct.
+- **Service trends:** Health, latency, error rate and CPU charts use observed synthetic samples only; the seeded initialization window is excluded. Service selection works from the graph and keyboard-accessible selector.
+- **What-if explorer:** Plot no action against any of the five recovery trajectories. Selecting an action for comparison does not apply it.
+- **Applied-action replay:** Retain the selected action’s starting forecast and overlay subsequent observed operational risk. Additional faults mark the pending comparison interrupted. A completed horizon reports mean absolute deviation as a same-model consistency check; this is not independent forecast validation.
+- **Incident evidence:** Record first detection latency, the first inferred origin, maximum observed affected/failed services, and recovery time. Initial origin comes from anomaly/graph evidence, not the injected target label. Current RCA is still free to change as symptoms evolve.
+- **Measured warning lead:** A lead is recorded only if a service was healthy when the model warned about it and later failed. Warnings that never become failures are not converted into an accuracy claim; remediation may have prevented the failure.
+- **Resolution:** An incident resolves after three consecutive ticks with all services healthy, no active injected fault and no current root-cause anomaly. Reset or a fresh scenario clears this in-memory evidence. Export before resetting to preserve the report.
+
+The 20-test suite additionally covers playback locking, exact stepping, speed semantics, world reset identities, inferred-origin retention, observed lead-time ordering, trajectory summary parity, forecast/observed consistency, and interruption by a new fault.

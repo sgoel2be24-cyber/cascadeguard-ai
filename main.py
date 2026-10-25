@@ -1,38 +1,36 @@
-"""CascadeGuard AI: shared synthetic incident sandbox and explainable analysis."""
+"""CascadeGuard AI: an explainable shared synthetic incident sandbox."""
+
 import asyncio
 import json
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Optional
+from time import monotonic
+from typing import Literal, Optional
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-import engine
-from simulator import Simulator, TOPOLOGY
+from pydantic import BaseModel, ConfigDict
+from runtime import Runtime
 
 ROOT = Path(__file__).resolve().parent
-sim = Simulator(seed=42)
-cached = None
-
-
-def payload():
-    global cached
-    if cached is None:
-        cached = {**sim.snapshot(), 'analysis': engine.analyze(sim), 'mode':'synthetic', 'tick_seconds':2}
-    return cached
-
-
-def invalidate():
-    global cached
-    cached = None
+runtime = Runtime()
 
 
 async def ticker():
+    deadline = monotonic() + 2
+    playback = None
     while True:
-        sim.tick()
-        invalidate()
-        await asyncio.sleep(2)
+        await asyncio.sleep(0.1)
+        now = monotonic()
+        current = (runtime.world_id, runtime.paused, runtime.speed)
+        if current != playback:
+            playback = current
+            deadline = now + 2 / runtime.speed
+        if runtime.paused:
+            continue
+        if now >= deadline:
+            runtime.advance()
+            deadline = monotonic() + 2 / runtime.speed
 
 
 @asynccontextmanager
@@ -44,95 +42,128 @@ async def lifespan(app):
         await task
 
 
-app = FastAPI(title='CascadeGuard AI', version='2.0.0', lifespan=lifespan)
+app = FastAPI(title="CascadeGuard AI", version="3.0.0", lifespan=lifespan)
 
 
-class ChaosRequest(BaseModel):
+class RequestModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChaosRequest(RequestModel):
     service: Optional[str] = None
 
 
-class FixRequest(BaseModel):
+class FixRequest(RequestModel):
     service: str
     strategy: str
 
 
-class ScenarioRequest(BaseModel):
-    scenario: str = 'payment'
+class ScenarioRequest(RequestModel):
+    scenario: Literal["payment", "cache", "search"] = "payment"
 
 
-def check_service(service):
-    if service not in TOPOLOGY:
-        raise HTTPException(422, 'Unknown service')
+class ControlRequest(RequestModel):
+    paused: Optional[bool] = None
+    speed: Optional[Literal[1, 2, 4]] = None
 
 
-@app.get('/')
+def execute(callback):
+    try:
+        return callback()
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/")
 async def index():
-    return FileResponse(ROOT / 'static/index.html', headers={'Cache-Control':'no-cache'})
+    return FileResponse(
+        ROOT / "static/index.html", headers={"Cache-Control": "no-cache"}
+    )
 
 
-@app.get('/healthz')
+@app.get("/healthz")
 async def health():
-    return {'status':'ok','mode':'synthetic','services':len(TOPOLOGY),'tick':sim.tick_no}
+    return {
+        "status": "ok",
+        "mode": "synthetic",
+        "services": len(runtime.sim.services),
+        "tick": runtime.sim.tick_no,
+        "paused": runtime.paused,
+        "speed": runtime.speed,
+    }
 
 
-@app.get('/api/state')
+@app.get("/api/state")
 async def state():
-    return JSONResponse(payload())
+    return JSONResponse(runtime.state())
 
 
-@app.get('/api/report')
+@app.get("/api/report")
 async def report():
-    return JSONResponse({'project':'CascadeGuard AI', 'disclosure':'Shared synthetic sandbox; heuristic estimates, not production guarantees.', **payload()},
-                        headers={'Content-Disposition':'attachment; filename="cascadeguard-incident.json"'})
+    return JSONResponse(
+        {
+            "project": "CascadeGuard AI",
+            "disclosure": "Shared synthetic sandbox; heuristic estimates. Forecast consistency uses the same simulator, not independent production evidence.",
+            **runtime.state(),
+        },
+        headers={
+            "Content-Disposition": 'attachment; filename="cascadeguard-incident.json"'
+        },
+    )
 
 
-@app.post('/api/chaos')
+@app.post("/api/chaos")
 async def chaos(req: ChaosRequest):
-    if req.service is not None:
-        check_service(req.service)
-    svc = sim.inject_chaos(req.service)
-    invalidate()
-    return {'injected':svc}
+    return {"injected": execute(lambda: runtime.inject(req.service))}
 
 
-@app.post('/api/fix')
+@app.post("/api/fix")
 async def fix(req: FixRequest):
-    check_service(req.service)
-    if req.strategy not in engine.STRATEGIES:
-        raise HTTPException(422, 'Unknown recovery strategy')
-    sim.apply_fix(req.service, req.strategy)
-    invalidate()
-    return {'ok':True}
+    execute(lambda: runtime.fix(req.service, req.strategy))
+    return {"ok": True}
 
 
-@app.post('/api/reset')
+@app.post("/api/reset")
 async def reset():
-    sim.reset(seed=42)
-    invalidate()
-    return {'ok':True}
+    runtime.reset()
+    return {"ok": True}
 
 
-@app.post('/api/scenario')
+@app.post("/api/scenario")
 async def scenario(req: ScenarioRequest):
-    targets = {'payment':'payment-db', 'cache':'redis-cache', 'search':'elastic-cluster'}
-    if req.scenario not in targets:
-        raise HTTPException(422, 'Unknown scenario')
-    sim.reset(seed=42)
-    target = targets[req.scenario]
-    sim.inject_chaos(target, severity=.13)
-    invalidate()
-    return {'ok':True,'target':target}
+    return {"ok": True, "target": execute(lambda: runtime.scenario(req.scenario))}
 
 
-@app.websocket('/ws')
+@app.post("/api/control")
+async def control(req: ControlRequest):
+    execute(lambda: runtime.control(req.paused, req.speed))
+    return {"ok": True, "paused": runtime.paused, "speed": runtime.speed}
+
+
+@app.post("/api/step")
+async def step():
+    if not runtime.paused:
+        raise HTTPException(409, "Pause the simulation before stepping")
+    runtime.step()
+    return {"ok": True, "tick": runtime.sim.tick_no}
+
+
+@app.websocket("/ws")
 async def ws(websocket: WebSocket):
     await websocket.accept()
+    last_revision = None
+    last_sent = 0.0
     try:
         while True:
-            await websocket.send_text(json.dumps(payload()))
-            await asyncio.sleep(2)
+            now = monotonic()
+            revision = (runtime.world_id, runtime.revision)
+            if revision != last_revision or now - last_sent >= 2:
+                await websocket.send_text(json.dumps(runtime.state()))
+                last_revision = revision
+                last_sent = now
+            await asyncio.sleep(0.1)
     except (WebSocketDisconnect, RuntimeError):
         pass
 
 
-app.mount('/static', StaticFiles(directory=ROOT/'static'), name='static')
+app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")

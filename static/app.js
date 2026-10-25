@@ -45,13 +45,21 @@ function connection(text, mode) {
   $("connection").className = "connection " + mode;
 }
 function buttons() {
-  for (const id of ["demoBtn", "chaosBtn", "resetBtn"])
+  for (const id of [
+    "demoBtn",
+    "chaosBtn",
+    "resetBtn",
+    "pauseSimBtn",
+    "speedSelect",
+  ])
     $(id).disabled = busy || !state || stale;
   $("autoFixBtn").disabled =
     busy ||
     stale ||
     !state?.analysis.root_cause ||
-    !state?.analysis.recommendations.length;
+    !state?.analysis.recommendations.length ||
+    state.analysis.recommendations[0]?.risk_reduction <= 0;
+  $("stepBtn").disabled = busy || !state || stale || !state.playback.paused;
   document
     .querySelectorAll("[data-strategy]")
     .forEach((b) => (b.disabled = busy || stale));
@@ -79,6 +87,12 @@ async function action(path, body, message) {
       const d = await res.json();
       throw Error(typeof d.detail === "string" ? d.detail : "Action rejected");
     }
+    const result = await res.json();
+    if (result.target) {
+      selected = result.target;
+      $("serviceSelect").value = selected;
+    }
+    if (path === "/api/fix") comparisonMode = "applied";
     if (path === "/api/reset" || path === "/api/scenario") {
       riskHistory = [];
       lastTick = -1;
@@ -93,21 +107,32 @@ async function action(path, body, message) {
   }
 }
 function receive(data) {
+  if (state?.world_id === data.world_id && data.revision < state.revision)
+    return;
+  const same =
+    state?.world_id === data.world_id && state?.revision === data.revision;
+  if (state?.world_id !== data.world_id) {
+    riskHistory = [];
+    lastTick = -1;
+    comparisonStrategy = null;
+    comparisonMode = "whatif";
+  }
   state = data;
   lastReceived = Date.now();
   stale = false;
-  render();
+  if (!same) render();
+  else buttons();
 }
 function connect() {
   clearTimeout(reconnectTimer);
   socket = new WebSocket(
     `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`,
   );
-  socket.onopen = () => connection("Live · 2s", "live");
+  socket.onopen = () => connection("Live stream", "live");
   socket.onmessage = (e) => {
     try {
       receive(JSON.parse(e.data));
-      connection("Live · 2s", "live");
+      connection("Live stream", "live");
     } catch {
       toast("Unable to read telemetry frame", true);
     }
@@ -166,7 +191,7 @@ const cubic = (a, b, c, d, t) =>
   3 * (1 - t) * t * t * c +
   t ** 3 * d;
 function draw() {
-  frame++;
+  if (!state?.playback?.paused) frame++;
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#28425655";
   for (let x = 15; x < width; x += 24)
@@ -187,6 +212,7 @@ function draw() {
           q = positions[dep];
         if (!p || !q) continue;
         const hot = chain.has(name) && chain.has(dep);
+        ctx.globalAlpha = impactOnly && root && !hot ? 0.13 : 1;
         ctx.strokeStyle = state.services[dep].isolated
           ? "#70adce"
           : hot
@@ -218,6 +244,8 @@ function draw() {
     for (const [name, s] of Object.entries(state.services)) {
       const p = positions[name];
       if (!p) continue;
+      ctx.globalAlpha =
+        impactOnly && root && !chain.has(name) && name !== selected ? 0.18 : 1;
       const col = colors[s.state],
         r = 15;
       const pulse = reducedMotion ? 0.5 : (Math.sin(frame / 22) + 1) / 2;
@@ -300,6 +328,7 @@ function draw() {
       );
     }
   }
+  ctx.globalAlpha = 1;
   requestAnimationFrame(draw);
 }
 function pick(event) {
@@ -342,10 +371,12 @@ graph.addEventListener(
 function renderInspection() {
   if (!state) return;
   const s = state.services[selected];
+  renderTrends(s);
   $("inspection").innerHTML =
     `<b>${esc(selected)}</b><span style="color:${colors[s.state]}">${esc(s.state.toUpperCase())}</span>${s.isolated ? " · CIRCUIT OPEN" : ""}<br>Health <b>${Math.round(s.health * 100)}%</b> Latency <b>${s.latency.toFixed(0)} ms</b> Errors <b>${(s.error_rate * 100).toFixed(1)}%</b> CPU <b>${s.cpu.toFixed(0)}%</b> Memory <b>${s.mem.toFixed(0)}%</b>`;
 }
 function render() {
+  const activeStrategy = document.activeElement?.dataset.strategy;
   const a = state.analysis,
     services = Object.values(state.services),
     rc = a.root_cause;
@@ -402,6 +433,15 @@ function render() {
   $("rcaBody").innerHTML = rc
     ? `<div class="overline">SUSPECTED ORIGIN</div><div class="rc-service">${esc(rc.service)}</div><div class="strength"><span>Evidence strength</span><span>${Math.round(rc.confidence * 100)} / 100</span></div><div class="conf-bar"><div class="conf-fill" style="width:${rc.confidence * 100}%"></div></div><ul class="evidence">${rc.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>`
     : `<div class="empty"><div class="empty-icon">✓</div><strong>No anomalous origin detected</strong>Run a scenario to see evidence build as the dependency degrades.</div>`;
+  if (
+    state.incident?.initial_origin &&
+    state.incident.initial_origin !== rc?.service
+  ) {
+    $("rcaBody").insertAdjacentHTML(
+      "beforeend",
+      `<div class="origin-note">Initial incident origin: <b>${esc(state.incident.initial_origin)}</b>. The panel above reflects current anomalous evidence.</div>`,
+    );
+  }
   $("predBody").innerHTML = a.predictions.length
     ? a.predictions
         .map(
@@ -455,7 +495,14 @@ function render() {
   renderInspection();
   renderLogs();
   layout();
+  renderPlayback();
+  renderIncident();
+  renderComparison();
   buttons();
+  if (activeStrategy)
+    document
+      .querySelector(`[data-strategy="${activeStrategy}"]`)
+      ?.focus({ preventScroll: true });
 }
 function renderLogs() {
   if (!state || paused) return;
@@ -533,6 +580,61 @@ for (const id of ["helpBtn", "methodBtn"])
   $(id).onclick = () => $("helpDialog").showModal();
 for (const id of ["closeHelp", "startGuide"])
   $(id).onclick = () => $("helpDialog").close();
+$("pauseSimBtn").onclick = () =>
+  action(
+    "/api/control",
+    { paused: !state.playback.paused },
+    state.playback.paused
+      ? "Simulation resumed."
+      : "Simulation paused. Telemetry and forecasts are held at this tick.",
+  );
+$("stepBtn").onclick = () =>
+  action("/api/step", {}, "Advanced one tick · 2 simulated seconds.");
+$("speedSelect").onchange = (e) =>
+  action(
+    "/api/control",
+    { speed: Number(e.target.value) },
+    `Playback set to ${e.target.value}×. Simulation timestamps still advance by 2 seconds per tick.`,
+  );
+$("impactToggle").onclick = () => {
+  impactOnly = !impactOnly;
+  $("impactToggle").setAttribute("aria-pressed", String(impactOnly));
+};
+$("compareStrategy").onchange = (e) => {
+  comparisonStrategy = e.target.value;
+  renderComparison();
+};
+$("whatIfBtn").onclick = () => {
+  comparisonMode = "whatif";
+  renderComparison();
+};
+$("appliedBtn").onclick = () => {
+  comparisonMode = "applied";
+  renderComparison();
+};
+$("inspectOriginBtn").onclick = () => {
+  const origin = state.analysis.root_cause?.service;
+  if (origin) {
+    selected = origin;
+    $("serviceSelect").value = selected;
+    renderInspection();
+    renderLogs();
+  }
+};
+$("leadEvidence").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-inspect]");
+  if (b) {
+    selected = b.dataset.inspect;
+    $("serviceSelect").value = selected;
+    renderInspection();
+    renderLogs();
+    $("serviceTelemetry").scrollIntoView({
+      behavior: reducedMotion ? "instant" : "smooth",
+      block: "start",
+    });
+  }
+});
+buttons();
 refresh().catch(() => {
   connection("Unable to connect", "offline");
   toast("Waiting for the telemetry server…", true);
@@ -549,3 +651,12 @@ function focusView(on) {
 }
 $("focusBtn").onclick = () => focusView(true);
 $("focusExit").onclick = () => focusView(false);
+
+for (const link of document.querySelectorAll('.rail a[href^="#"]')) {
+  link.addEventListener("click", () => {
+    document
+      .querySelectorAll(".rail a")
+      .forEach((a) => a.classList.remove("active"));
+    link.classList.add("active");
+  });
+}

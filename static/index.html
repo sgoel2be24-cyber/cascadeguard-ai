@@ -13,7 +13,7 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%230b1018'/%3E%3Cpath d='M20 6 33 11v10c0 7-13 14-13 14S7 28 7 21V11Z' fill='none' stroke='%235ee7bb' stroke-width='3'/%3E%3C/svg%3E"
     />
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=3.0.0" />
   </head>
   <body>
     <a class="skip" href="#workspace">Skip to incident workspace</a>
@@ -77,8 +77,8 @@
         <div class="sandbox-note">
           <span class="small-tag">SIMULATED TELEMETRY</span
           ><span
-            >17 services · shared live sandbox · 2s refresh · explainable
-            statistical & graph models</span
+            >17 services · shared live sandbox · 2s simulation ticks ·
+            explainable statistical & graph models</span
           ><button id="methodBtn">How it works ↗</button>
         </div>
         <section class="metrics" aria-label="System overview">
@@ -95,7 +95,7 @@
           <div class="metric">
             <span class="metric-label">CASCADE RISK <span>02</span></span>
             <div class="metric-value">
-              <b id="riskValue">—</b><span>%</span
+              <b id="riskValue">—</b><span>/ 100</span
               ><svg class="spark" viewBox="0 0 120 35" aria-hidden="true">
                 <polyline
                   id="riskSpark"
@@ -149,17 +149,56 @@
             ↗ Apply best recovery
           </button>
         </section>
+        <section class="playback-bar" aria-label="Simulation playback">
+          <div class="playback-status">
+            <span class="live-dot"></span
+            ><b id="playbackStatus">Simulation running</b
+            ><span id="simClock">T+000s</span>
+          </div>
+          <div class="playback-controls">
+            <button
+              id="pauseSimBtn"
+              class="compact-button"
+              aria-pressed="false"
+            >
+              Ⅱ Pause simulation</button
+            ><button id="stepBtn" class="compact-button" disabled>
+              Step +2s →</button
+            ><label for="speedSelect">Playback</label
+            ><select id="speedSelect">
+              <option value="1">1× real time</option>
+              <option value="2">2× accelerated</option>
+              <option value="4">4× accelerated</option>
+            </select>
+          </div>
+          <span class="playback-disclosure"
+            >Shared controls · 1 tick = 2 simulated seconds</span
+          >
+        </section>
+        <section
+          id="incidentRibbon"
+          class="incident-ribbon"
+          hidden
+          aria-label="Incident summary"
+        ></section>
         <div class="workspace-grid">
           <section class="panel topology">
             <div class="panel-heading">
               <div>
                 <span class="section-num">01</span>
                 <h2>Service topology</h2>
-                <span class="badge">LIVE</span>
+                <span class="badge" id="graphMode">LIVE</span>
               </div>
               <span id="tickLabel">Waiting for stream</span>
             </div>
             <div class="graph-toolbar">
+              <button
+                id="impactToggle"
+                class="graph-toggle"
+                aria-pressed="false"
+              >
+                Focus impact
+              </button>
               <span><i class="dot healthy"></i> Healthy</span
               ><span><i class="dot degraded"></i> Degraded</span
               ><span><i class="dot critical"></i> Critical / failed</span
@@ -197,7 +236,9 @@
                 </div>
                 <span class="badge neutral">EXPLAINABLE</span>
               </div>
-              <div id="rcaBody" class="card-body"></div>
+              <div id="rcaBody" class="card-body">
+                <div class="empty">Connecting to telemetry…</div>
+              </div>
             </section>
             <section class="panel">
               <div class="panel-heading">
@@ -207,7 +248,9 @@
                 </div>
                 <span class="badge neutral">NEXT</span>
               </div>
-              <div id="predBody"></div>
+              <div id="predBody">
+                <div class="empty">Waiting for a live snapshot…</div>
+              </div>
               <div class="panel-note">
                 Risk is a heuristic score. Time estimates extrapolate recent
                 health decline.
@@ -224,6 +267,25 @@
             </section>
           </aside>
         </div>
+        <section class="panel service-telemetry" id="serviceTelemetry">
+          <div class="panel-heading">
+            <div>
+              <span class="section-num">↳</span>
+              <h2>Service telemetry</h2>
+              <span id="telemetryService" class="telemetry-service"
+                >payment-db</span
+              >
+            </div>
+            <button id="inspectOriginBtn" class="compact-button" disabled>
+              Inspect current origin ↗
+            </button>
+          </div>
+          <div id="trendCharts" class="trend-grid"></div>
+          <div class="panel-note" id="trendNote">
+            Observed synthetic samples only. Seeded reference samples are
+            excluded from these charts.
+          </div>
+        </section>
         <section class="panel recovery" id="recovery">
           <div class="panel-heading">
             <div>
@@ -237,11 +299,46 @@
             An incident unlocks five recovery trials. Each runs the same
             simulator with a different action.
           </div>
+          <div class="comparison-wrap">
+            <div class="comparison-top">
+              <div
+                class="view-tabs"
+                role="group"
+                aria-label="Recovery chart mode"
+              >
+                <button id="whatIfBtn" class="active" aria-pressed="true">
+                  What if?</button
+                ><button id="appliedBtn" aria-pressed="false" disabled>
+                  Applied action
+                </button>
+              </div>
+              <div class="compare-field">
+                <label for="compareStrategy">Compare action</label
+                ><select id="compareStrategy" disabled></select>
+              </div>
+            </div>
+            <div class="comparison-grid">
+              <div id="forecastChart" class="forecast-chart"></div>
+              <div id="forecastNarrative" class="forecast-narrative"></div>
+            </div>
+          </div>
           <div id="recBody" class="strategy-grid"></div>
           <div class="panel-note">
             Utility = mean risk reduction ÷ (1 + estimated downtime / 60).
             Downtime is an assumed strategy cost; execution is simulated.
           </div>
+        </section>
+        <section class="panel incident-evidence" id="incidentEvidence">
+          <div class="panel-heading">
+            <div>
+              <span class="section-num">◎</span>
+              <h2>Observed incident evidence</h2>
+              <span class="badge neutral">MEASURED IN SIMULATION</span>
+            </div>
+            <span id="evidenceStatus">Awaiting incident</span>
+          </div>
+          <div id="incidentStats" class="incident-stats"></div>
+          <div id="leadEvidence" class="lead-evidence"></div>
         </section>
         <section class="bottom-grid">
           <div class="panel timeline-panel">
@@ -288,6 +385,11 @@
         ><button id="closeHelp" aria-label="Close guide">✕</button>
       </div>
       <h2>From a weak signal<br />to a recovery decision.</h2>
+      <p class="guide-callout">
+        Pause the simulation while explaining a frame. Use Step +2s for one
+        causal tick, or 4× playback to show recovery without waiting. These
+        controls affect all viewers.
+      </p>
       <ol>
         <li>
           <b>Run a scenario.</b> A seeded fault degrades one dependency. Every
@@ -318,12 +420,14 @@
       <p>
         All visitors share this sandbox. Resetting or running a scenario affects
         every viewer. Export captures the currently buffered telemetry,
-        analysis, and action history.
+        analysis, forecast trajectories, observed prediction lead times, and
+        action history.
       </p>
       <button id="startGuide" class="button primary">
         Explore the workspace →
       </button>
     </dialog>
-    <script src="/static/app.js"></script>
+    <script src="/static/insights.js?v=3.0.0"></script>
+    <script src="/static/app.js?v=3.0.0"></script>
   </body>
 </html>

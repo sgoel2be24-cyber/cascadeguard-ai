@@ -32,7 +32,7 @@ Python 3.9+, FastAPI, Uvicorn, Pydantic, WebSockets, HTML5 Canvas, vanilla JavaS
 The project owner’s handover states that the initial simulator, prediction engine, API, and dashboard were built during the hackathon on 25 October 2026, with no project code written before the event. Those components already existed before the Codex polish pass. During the polish pass, we improved the recovery model and simulator consistency, added seeded scenarios, input validation and regression tests, redesigned the dashboard, and updated documentation. AI-assisted development and third-party libraries were used. Confirm the initial timing and prior-work statement against your own records before submitting; do not claim independently verified authorship history.
 
 **Validation:**
-Ten automated engine tests passed, including identification of the injected origin across 17 services and three seeds (51 synthetic cases), prediction of a healthy caller before failure, five-strategy forecast/action parity, full-chain recovery, and timed circuit-breaker protection. Fourteen local HTTP/WebSocket smoke checks passed. These validate the simulator prototype, not real-world prediction accuracy.
+Twenty engine/runtime tests passed, including identification of the injected origin across 17 services and three seeds (51 synthetic cases), prediction of a healthy caller before failure, five-strategy forecast/action parity, full-chain recovery, and timed circuit-breaker protection. The expanded local API/WebSocket run passed 81 checks, including explicit single-step requests. These validate the simulator prototype, not real-world prediction accuracy.
 
 ## Video script · approximately 2 minutes 40 seconds
 
@@ -47,6 +47,8 @@ Show the normal overview and enter Focus view. “Here is the topology, with liv
 **0:35–0:55 — prediction and evidence**
 “Latency and errors rise at payment-db. The model compares recent observations with a robust baseline and propagates risk through the dependency graph. Notice exposed callers can appear in the forecast while still healthy. When a declining health trend is available, the engine adds an approximate time-to-failure.”
 
+Pause the simulation near T+16–24s before continuing the explanation. The transport remains live; only the synthetic world is paused.
+
 **0:55–1:15 — origin and impact**
 “Root cause ranking favors an anomalous service whose dependencies do not already explain its symptoms. Here is the metric evidence. The impact chain follows payment-db through payment-service and order-service to the gateway. Evidence strength and risk are heuristic scores, not calibrated probabilities.”
 
@@ -54,7 +56,7 @@ Show the normal overview and enter Focus view. “Here is the topology, with liv
 Scroll to the recovery lab. “Each of these five actions runs through a separate copy of the same simulator for 40 simulated seconds, using the same starting state and random stream. The model compares mean operational risk against taking no action, with an explicit assumed downtime penalty. This is the current best action under those assumptions.” Apply the currently ranked best action before leaving this segment. Do not wait for every caller to fail.
 
 **1:45–2:10 — observed recovery**
-Return to the topology. “The action is logged. Now we watch the actual simulated recovery across subsequent ticks. A circuit breaker temporarily shields callers but does not heal the source; scale-out reduces fault pressure. Those distinctions are represented in both the forecast and execution.” If recovery is gradual, state that rather than claiming it has completed.
+Choose **4× accelerated** and **Resume simulation**, then return to the topology. “I am showing recovery at four-times playback speed; the simulated clock remains visible. The action is logged. Now we watch the actual simulated recovery across subsequent ticks. A circuit breaker temporarily shields callers but does not heal the source; scale-out reduces fault pressure. Those distinctions are represented in both the forecast and execution.” If recovery is gradual, state that rather than claiming it has completed.
 
 **2:10–2:30 — technical credibility**
 “Recovery forecasts do not mutate the live system. Our tests cover origin detection across every service with three seeds, forecast/action parity, circuit-breaker expiry, and full-chain recovery. The app uses Python, FastAPI, WebSockets, and a dependency-free Canvas interface. AI development tools were used and disclosed.”
@@ -84,3 +86,13 @@ Show export and the final overview. “The exported incident contains the curren
 - [ ] Keep the machine awake, server running, and current tunnel alive until judging ends.
 
 **Deadline discrepancy:** The official Unstop submission stage says 4:30 PM IST on 25 October 2026, while its long description says 3:30 PM final submission and 3:15 PM build/deployment. Observed during the polish pass. Use the earlier 3:15 / 3:30 targets unless the organizers explicitly confirm otherwise. Source: https://unstop.com/hackathons/orca-coders-orcathon-devharbour-1768929
+
+## Improved recording flow with playback controls
+
+1. Enter Focus view. Run the payment scenario, then pause at roughly T+16–24s. The WebSocket connection stays live while the simulated world holds still.
+2. Explain current evidence and the first inferred origin. Use Step +2s to demonstrate a single propagation step. Focus impact dims unrelated services.
+3. Inspect the observed service trends. Compare two recovery trajectories using the action selector; comparison alone never executes the action.
+4. Apply the chosen recovery while paused. The Applied action chart retains its starting prediction. Choose 4× playback and resume: 40 simulated seconds now take about 10 wall-clock seconds plus computation time. The interface shows acceleration and simulated timestamps explicitly.
+5. Show the observed dots on the forecast curve and the incident evidence after recovery. Describe agreement as same-model consistency, not proof of production accuracy. Export before resetting.
+
+New capabilities to highlight: real observed lead time within the synthetic incident, initial inferred-origin retention, pause/step/accelerate controls, four telemetry trend charts, selectable strategy trajectories and forecast-versus-observed outcome replay.

@@ -11,22 +11,22 @@ from collections import deque
 
 # service name -> list of services it DEPENDS ON (downstream deps)
 TOPOLOGY = {
-    "api-gateway":    ["auth-service", "order-service", "product-service"],
-    "auth-service":   ["user-db", "redis-cache"],
-    "order-service":  ["payment-service", "inventory-service", "order-db"],
-    "product-service":["product-db", "search-service"],
-    "payment-service":["payment-db", "fraud-detector"],
+    "api-gateway": ["auth-service", "order-service", "product-service"],
+    "auth-service": ["user-db", "redis-cache"],
+    "order-service": ["payment-service", "inventory-service", "order-db"],
+    "product-service": ["product-db", "search-service"],
+    "payment-service": ["payment-db", "fraud-detector"],
     "inventory-service": ["inventory-db", "message-queue"],
     "search-service": ["elastic-cluster"],
     "fraud-detector": ["ml-model-store"],
-    "user-db":        [],
-    "order-db":       [],
-    "product-db":     [],
-    "payment-db":     [],
-    "inventory-db":   [],
-    "redis-cache":    [],
-    "elastic-cluster":[],
-    "message-queue":  [],
+    "user-db": [],
+    "order-db": [],
+    "product-db": [],
+    "payment-db": [],
+    "inventory-db": [],
+    "redis-cache": [],
+    "elastic-cluster": [],
+    "message-queue": [],
     "ml-model-store": [],
 }
 
@@ -36,23 +36,31 @@ for svc, deps in TOPOLOGY.items():
     for d in deps:
         DEPENDENTS[d].append(svc)
 
+
 # layer assignment for layout (rough depth from edge)
 def _layers():
     depth = {}
+
     def d(s):
         if s in depth:
             return depth[s]
         depth[s] = 0 if not TOPOLOGY[s] else 1 + max(d(x) for x in TOPOLOGY[s])
         return depth[s]
+
     for s in TOPOLOGY:
         d(s)
     return depth
 
+
 LAYERS = _layers()
 
 BASE_LATENCY = {  # ms baseline per service class
-    "gateway": 40, "service": 60, "db": 15, "infra": 10,
+    "gateway": 40,
+    "service": 60,
+    "db": 15,
+    "infra": 10,
 }
+
 
 def _base_latency(name):
     if "db" in name or "store" in name:
@@ -95,8 +103,14 @@ LOG_TEMPLATES = {
     ],
 }
 
-ERRORS = ["NullPointerException", "TimeoutError", "ConnectionRefused",
-          "DeadlockDetected", "DiskFull", "TLSHandshakeFailure"]
+ERRORS = [
+    "NullPointerException",
+    "TimeoutError",
+    "ConnectionRefused",
+    "DeadlockDetected",
+    "DiskFull",
+    "TLSHandshakeFailure",
+]
 
 
 class Service:
@@ -105,13 +119,13 @@ class Service:
         self.fault = None
         self.isolated_until = 0
         self.name = name
-        self.state = "healthy"        # healthy | degraded | critical | failed
-        self.health = 1.0             # 1.0 perfect -> 0.0 dead
+        self.state = "healthy"  # healthy | degraded | critical | failed
+        self.health = 1.0  # 1.0 perfect -> 0.0 dead
         self.latency = _base_latency(name)
         self.error_rate = 0.005
         self.cpu = self.rng.uniform(15, 35)
         self.mem = self.rng.uniform(20, 45)
-        self.history = deque(maxlen=120)   # metric snapshots
+        self.history = deque(maxlen=120)  # metric snapshots
         self.last_anomaly_tick = None
 
     def tick(self, tick_no, dep_health):
@@ -137,9 +151,7 @@ class Service:
                 self.fault = None
 
         h = self.health
-        self.state = ("healthy" if h > 0.8 else
-                      "degraded" if h > 0.5 else
-                      "critical" if h > 0.15 else "failed")
+        self.refresh_state()
 
         # metrics derive from health
         noise = self.rng.uniform(0.9, 1.1)
@@ -148,22 +160,41 @@ class Service:
         self.cpu = min(100, 25 + (1 - h) * 70 * noise)
         self.mem = min(100, 35 + (1 - h) * 55 * noise)
 
-        self.history.append({
-            "tick": tick_no,
-            "latency": round(self.latency, 1),
-            "error_rate": round(self.error_rate, 4),
-            "health": round(h, 3),
-        })
+        self.history.append(
+            {
+                "tick": tick_no,
+                "latency": round(self.latency, 1),
+                "error_rate": round(self.error_rate, 4),
+                "health": round(h, 3),
+                "cpu": round(self.cpu, 1),
+                "mem": round(self.mem, 1),
+            }
+        )
 
-    fault = None
+    def refresh_state(self):
+        self.state = (
+            "healthy"
+            if self.health > 0.8
+            else "degraded"
+            if self.health > 0.5
+            else "critical"
+            if self.health > 0.15
+            else "failed"
+        )
 
     def log_line(self, tick_no):
         deps = TOPOLOGY[self.name]
         dep = self.rng.choice(deps) if deps else "internal"
         lat = int(self.latency)
-        ctx = {"lat": lat, "dep": dep, "n": self.rng.randint(1, 3),
-               "pool": self.rng.randint(5, 50), "hit": self.rng.randint(70, 99),
-               "mem": int(self.mem), "err": self.rng.choice(ERRORS)}
+        ctx = {
+            "lat": lat,
+            "dep": dep,
+            "n": self.rng.randint(1, 3),
+            "pool": self.rng.randint(5, 50),
+            "hit": self.rng.randint(70, 99),
+            "mem": int(self.mem),
+            "err": self.rng.choice(ERRORS),
+        }
         if self.state == "healthy":
             level = "INFO" if self.rng.random() < 0.95 else "WARN"
         elif self.state == "degraded":
@@ -174,8 +205,13 @@ class Service:
             level = "CRITICAL"
         msg = self.rng.choice(LOG_TEMPLATES[level]).format(**ctx)
         ts = time.strftime("%H:%M:%S")
-        return {"tick": tick_no, "ts": ts, "level": level,
-                "service": self.name, "msg": msg}
+        return {
+            "tick": tick_no,
+            "ts": ts,
+            "level": level,
+            "service": self.name,
+            "msg": msg,
+        }
 
 
 class Simulator:
@@ -198,18 +234,31 @@ class Simulator:
 
     def inject_chaos(self, service=None, severity=None):
         service = service or self.rng.choice(
-            [s for s in TOPOLOGY if DEPENDENTS[s]])  # pick something with dependents
+            [s for s in TOPOLOGY if DEPENDENTS[s]]
+        )  # pick something with dependents
         severity = severity or self.rng.uniform(0.10, 0.18)
         svc = self.services[service]
         svc.fault = (severity, self.rng.randint(25, 40))
-        self.events.append({"tick": self.tick_no, "type": "chaos",
-                            "service": service, "severity": round(severity, 2)})
+        self.events.append(
+            {
+                "tick": self.tick_no,
+                "type": "chaos",
+                "service": service,
+                "severity": round(severity, 2),
+            }
+        )
         return service
 
     def apply_fix(self, service, strategy):
         if service not in self.services:
             raise ValueError("Unknown service")
-        if strategy not in {"restart", "failover", "scale_out", "circuit_breaker", "rollback"}:
+        if strategy not in {
+            "restart",
+            "failover",
+            "scale_out",
+            "circuit_breaker",
+            "rollback",
+        }:
             raise ValueError("Unknown recovery strategy")
         svc = self.services[service]
         if strategy == "restart":
@@ -227,16 +276,29 @@ class Simulator:
         elif strategy == "rollback":
             svc.health = min(1.0, svc.health + 0.55)
             svc.fault = None
-        self.events.append({"tick": self.tick_no, "type": "fix",
-                            "service": service, "strategy": strategy})
+        svc.refresh_state()
+        self.events.append(
+            {
+                "tick": self.tick_no,
+                "type": "fix",
+                "service": service,
+                "strategy": strategy,
+            }
+        )
 
     def tick(self):
         self.tick_no += 1
         previous = {n: s.health for n, s in self.services.items()}
         for name, svc in self.services.items():
             deps = TOPOLOGY[name]
-            dep_health = min((previous[d] for d in deps
-                              if self.services[d].isolated_until <= self.tick_no), default=1.0)
+            dep_health = min(
+                (
+                    previous[d]
+                    for d in deps
+                    if self.services[d].isolated_until <= self.tick_no
+                ),
+                default=1.0,
+            )
             svc.tick(self.tick_no, dep_health)
             # emit 1-3 log lines per service per tick
             for _ in range(self.rng.randint(1, 2) if svc.state == "healthy" else 3):
